@@ -1,0 +1,42 @@
+{
+  "name": "chessplus",
+  "tree": {
+	"$className": "DataModel",
+
+	"ReplicatedStorage": {
+		"Modules": {
+			"$path": "src/shared"
+		}
+	},
+
+	"ReplicatedFirst": {
+	  "$path": "src/first"
+	},
+
+	"ServerScriptService": {
+	  "Server": {
+		"$path": "src/server"
+	  }
+	},
+
+	"ServerStorage": {
+		"Services": {
+			"$path": "src/storage"
+		}
+	},
+
+	"StarterPlayer": {
+	  "StarterPlayerScripts": {
+		"Client": {
+		  "$path": "src/client"
+		}
+	  }
+	},
+
+	"Workspace": {
+	  "$properties": {
+		"FilteringEnabled": true
+	  }
+	}
+  }
+}
