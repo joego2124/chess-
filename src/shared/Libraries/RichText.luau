@@ -141,6 +141,7 @@ ________________________________________________________________________________
 
 --]]
 
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local textService = game:GetService("TextService")
 local runService = game:GetService("RunService")
@@ -254,20 +255,44 @@ function animationStyles.Wiggle(character, animateAlpha, properties)
 		)
 end
 
+function animationStyles.Bubble(character, animateAlpha, properties)
+	if not character.Parent then return end
+	character.Visible = true
+	local drift = properties.totalChars == 0 and 0
+		or (properties.charNum / properties.totalChars) * (math.pi * 0.1) * properties.charNum
+	local initialSize = Vector2.new(properties.InitialSize.X.Scale, properties.InitialSize.Y.Scale)
+	local offsetScale = TweenService:GetValue(
+		animateAlpha < 0.5 and animateAlpha * 2 or (1 - animateAlpha) * 2,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.InOut
+	) * (-math.abs(2 * animateAlpha - 1) + 1) * properties.AnimateStyleAmplitude
+	-- local newSize = initialSize
+	-- 	* (1 + math.sin(animateAlpha * math.pi + drift) * properties.AnimateStyleAmplitude)
+	local newSize = initialSize * (1 + offsetScale)
+	-- if character.Name == "Char001" then
+	-- 	print(1 + math.sin(animateAlpha * math.pi) * properties.AnimateStyleAmplitude)
+	-- end
+	character.Size = UDim2.fromScale(newSize.X, newSize.Y)
+end
+
 function animationStyles.Float(character, animateAlpha, properties)
 	character.Visible = true
-	local beta =
-		TweenService:GetValue(1 - animateAlpha, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
-	local amplitude = properties.InitialSize.Y.Offset
-		-- * (1 - beta)
+	local amplitude = character.AbsoluteSize.Y
+		/ character.Parent.AbsoluteSize.Y
 		* properties.AnimateStyleAmplitude
-	character.Position = properties.InitialPosition
-		+ UDim2.new(
-			0,
-			0,
-			0,
-			math.sin(beta * math.pi * 2 * properties.AnimateStyleNumPeriods) * amplitude / 2
-		)
+		/ 2
+	local period = 2 * math.pi
+	local drift = properties.totalChars == 0 and 0
+		or (properties.charNum / properties.totalChars) * (period * 0.1) * properties.charNum
+	local newPosY = math.sin(animateAlpha * 4 * period + drift) * amplitude
+	local STATIC_ROT_DEG = 5
+	local DYNM_ROT_DEG = 5
+	local newRot = -(STATIC_ROT_DEG / 2)
+		+ math.sin(2 * period + drift) * STATIC_ROT_DEG
+		+ math.sin(animateAlpha * 2 * period + drift) * (DYNM_ROT_DEG / 2)
+
+	character.Position = properties.InitialPosition + UDim2.fromScale(0, newPosY)
+	character.Rotation = newRot
 end
 
 function animationStyles.Swing(character, animateAlpha, properties)
@@ -520,8 +545,12 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 			newLabel:Destroy()
 			local lastLabel = textFrames[#lineFrames][#textFrames[#lineFrames]]
 			if lastLabel:IsA("TextLabel") and lastLabel.Text == " " then -- get rid of trailing space
-				lineFrame.Container.Size =
-					UDim2.new(0, linePosition - labelWidth - lastLabel.Size.X.Offset, 1, 0)
+				-- lineFrame.Container.Size =
+				-- 	UDim2.new(0, linePosition - labelWidth - lastLabel.Size.X.Offset, 1, 0)
+				lineFrame.Container.Size = UDim2.fromScale(
+					(linePosition - labelWidth - lastLabel.Size.X.Offset) / lineFrame.AbsoluteSize.X,
+					1
+				)
 				lastLabel:Destroy()
 				table.remove(textFrames[#lineFrames])
 			end
@@ -530,16 +559,23 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 		else
 			-- Label is ok
 			newLabel.Size = UDim2.new(0, labelWidth, 0, labelHeight)
-			lineFrame.Container.Size = UDim2.new(0, linePosition, 1, 0)
-			lineFrame.Size = UDim2.new(1, 0, 0, math.max(lineFrame.Size.Y.Offset, labelHeight))
+			-- lineFrame.Container.Size = UDim2.new(0, linePosition, 1, 0)
+			-- lineFrame.Size = UDim2.new(1, 0, 0, math.max(lineFrame.Size.Y.Offset, labelHeight))
+			lineFrame.Size = UDim2.fromScale(
+				1,
+				math.max(lineFrame.Size.Y.Offset, labelHeight) / lineFrame.Parent.AbsoluteSize.Y
+			)
+			lineFrame.Container.Size = UDim2.fromScale(linePosition / lineFrame.AbsoluteSize.X, 1)
 			newLabel.Name = string.format("Group%03d", #textFrames[#lineFrames] + 1)
 			newLabel.Parent = lineFrame.Container
+
 			table.insert(textFrames[#lineFrames], newLabel)
 			addFrameProperties(newLabel)
 			properties.AnimateYield = 0
 		end
 	end
 
+	local characterLabels = {}
 	function printText(text)
 		if text == "\n" then
 			newLine()
@@ -563,6 +599,11 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 		newTextLabel.TextTransparency = 1
 		newTextLabel.TextStrokeTransparency = 1
 		newTextLabel.TextWrapped = false
+		newTextLabel.BackgroundTransparency = 1
+
+		-- Paratext: preserve original UI stroke ratio
+		local origStrokeRatio = properties.BorderSizePixel and properties.BorderSizePixel / textSize
+			or 0
 
 		-- Keep the real text in individual frames per character:
 		local charPos = 0
@@ -576,8 +617,9 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 				Vector2.new(layerCollector.AbsoluteSize.X, textSize)
 			).X
 			local characterLabel = textLabel:Clone()
+			characterLabel.RichText = true -- Paratext: Enabled for scaling
 			characterLabel.Text = character
-			characterLabel.TextScaled = false
+			characterLabel.TextScaled = true
 			characterLabel.TextSize = textSize
 			characterLabel.Position = UDim2.new(0, charPos, 0, 0)
 			characterLabel.Size = UDim2.new(0, characterWidth + 1, 0, textSize)
@@ -587,11 +629,54 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 			addFrameProperties(characterLabel)
 			charPos = charPos + characterWidth
 			i = i + 1
+
+			-- Paratext: auto scale stroke size
+			if origStrokeRatio <= 0 then continue end
+			local UIStroke = Instance.new("UIStroke", characterLabel)
+			UIStroke.Thickness = properties.BorderSizePixel
+			UIStroke.Color = Color3.fromRGB(50, 50, 50)
+			local SCRIBBLE_SCALE = 0.35
+			-- UIStroke.Transparency = 0.25
+			local conn: RBXScriptConnection
+			-- conn = characterLabel:GetPropertyChangedSignal("Size"):Connect(function()
+			local t = 0
+			conn = RunService.Heartbeat:Connect(function(dt)
+				if not characterLabel or not characterLabel.Parent then
+					conn:Disconnect()
+					return
+				end
+				local noiseOffset =
+					math.noise(characterLabel.Position.X.Scale, math.sin(tick()) * 5)
+				UIStroke.Thickness = origStrokeRatio
+					* math.sqrt(textSize * characterLabel.AbsoluteSize.Y)
+					* (1 + noiseOffset * SCRIBBLE_SCALE)
+				-- if characterLabel.Name == "Char001" then print(noiseOffset) end
+				t += dt
+			end)
+
+			table.insert(characterLabels, characterLabel)
 		end
 
 		formatLabel(newTextLabel, textSize, textWidth, function()
 			if not overflown then printText(text) end
 		end)
+
+		-- Paratext: Resize all chars sizes from offset to scale
+		local labelAbsSize = newTextLabel.AbsoluteSize
+		for _, CharLabel in pairs(newTextLabel:GetChildren()) do
+			if not CharLabel:IsA("TextLabel") then continue end
+			CharLabel.Size = UDim2.fromScale(
+				CharLabel.Size.X.Offset / labelAbsSize.X,
+				CharLabel.Size.Y.Offset / labelAbsSize.Y
+			)
+			CharLabel.Position = UDim2.fromScale(
+				CharLabel.Position.X.Offset / labelAbsSize.X + CharLabel.Size.X.Scale / 2,
+				CharLabel.Size.Y.Scale
+			)
+			CharLabel.AnchorPoint = Vector2.new(0.5, 1)
+			frameProperties[CharLabel].InitialPosition = CharLabel.Position
+			frameProperties[CharLabel].InitialSize = CharLabel.Size
+		end
 	end
 
 	function printImage(imageId)
@@ -678,6 +763,20 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 	end
 
 	if not overflown then printSeries(labelSeries) end
+
+	-- Paratext: convert from offset to scale
+	for _, LineFrame in pairs(lineFrames) do
+		local Container = LineFrame:FindFirstChild("Container")
+		if not Container then continue end
+		for _, GroupLabel in pairs(Container:GetChildren()) do
+			GroupLabel.Size = UDim2.fromScale(
+				GroupLabel.Size.X.Offset / GroupLabel.Parent.AbsoluteSize.X,
+				GroupLabel.Size.Y.Offset / GroupLabel.Parent.AbsoluteSize.Y
+			)
+			GroupLabel.Position =
+				UDim2.fromScale(GroupLabel.Position.X.Offset / GroupLabel.Parent.AbsoluteSize.X, 1)
+		end
+	end
 
 	----- Alignment layout -----
 	local listLayout = Instance.new("UIListLayout")
@@ -786,7 +885,9 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 			end
 		end
 
-		local function animateCharacter(char, properties)
+		local function animateCharacter(char, properties, i, n)
+			properties.charNum = i or 0
+			properties.totalChars = n or 0
 			table.insert(animateQueue, { Char = char, Settings = properties, Start = tick() })
 		end
 
@@ -832,16 +933,13 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 						frame:IsA("TextLabel") --[[and not (frame.Text == " ") ]]
 					then
 						frame.Visible = true
-						local text = frame.Text
-						local i = 1
-						while true do
+						local totalChars = #frame:GetChildren()
+						for i = 1, totalChars do
 							local v = frame:FindFirstChild(string.format("Char%03d", i))
 							if not v then break end
-							animateCharacter(v, frameProperties[v])
+							animateCharacter(v, frameProperties[v], i, totalChars)
 							numAnimated = numAnimated + 1
-							yield()
 							if animationDone then return end
-							i = i + 1
 						end
 					else
 						animateCharacter(frame, properties)
@@ -882,6 +980,39 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 	----- Return object API -----
 
 	textObject.ContentSize = Vector2.new(contentRight - contentLeft, contentHeight)
+
+	-- Paratext: Applies an animation to all characters in order
+	local BUBBLE_TIME = 0.3
+	local BUBBLE_SIZE = 0.5
+	function textObject:animateChars()
+		local function animateChar(labels)
+			for i, Label: TextLabel in pairs(labels) do
+				table.insert(animateQueue, {
+					Char = Label,
+					Settings = {
+						AnimateStyle = "Bubble",
+						AnimateStyleTime = BUBBLE_TIME,
+						AnimateStyleAmplitude = BUBBLE_SIZE,
+						InitialSize = frameProperties[Label].InitialSize,
+						charNum = i,
+						-- totalChars = #characterLabels,
+						totalChars = 0,
+					},
+					Start = tick(),
+				})
+				task.wait(BUBBLE_TIME / 10)
+				-- print(Label.Name, Label.Text, frameProperties[Label].InitialSize)
+			end
+		end
+		task.spawn(function()
+			for _, line in pairs(textFrames) do
+				for _, Word in pairs(line) do
+					task.defer(function() animateChar(Word:GetChildren()) end)
+					task.wait(BUBBLE_TIME / 5)
+				end
+			end
+		end)
+	end
 
 	function textObject:Animate(yield)
 		if yield then
