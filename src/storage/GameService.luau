@@ -1,6 +1,7 @@
 --!strict
 
-local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+-- local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/4P/8/8/8"
 -- local STARTING_FEN = "8/8/8/3P/3R/8/3p/8"
 
 local HttpService = game:GetService("HttpService")
@@ -54,9 +55,23 @@ local function fenToBoardState(fen: string): ChessTypes.BoardState
 		}
 		state[rank][file] = piece
 		file += 1
+
+		-- Handle king castling initial conditions
+		if piece.Type == "King" then
+			piece.CanCastleLong = true
+			piece.CanCastleShort = true
+		end
 	end
 
 	return state
+end
+
+local function clearEnPassantFlags(boardState: ChessTypes.BoardState, color: ChessTypes.PieceColor)
+	for _, rank in pairs(boardState) do
+		for _, piece in pairs(rank) do
+			if piece.Color == color and piece.CanEnPassant then piece.CanEnPassant = false end
+		end
+	end
 end
 
 local function resetBoard() end
@@ -90,6 +105,9 @@ local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: 
 	-- Check to make sure target coord is valid
 	for _, coord in pairs(ChessUtils.getValidMoves(piece, boardState)) do
 		if coord == targetCoord then
+			-- Clear any en passant flags
+			clearEnPassantFlags(boardState, piece.Color)
+
 			-- Move piece
 			ChessUtils.movePiece(boardState, piece, coord)
 
@@ -132,7 +150,8 @@ function GameService.createGame(Player: Player): ChessTypes.ChessGame
 		state = fenToBoardState(STARTING_FEN),
 		turn = "White",
 		WhitePlayer = Player,
-		BlackPlayer = "AI",
+		-- BlackPlayer = "AI",
+		BlackPlayer = Player,
 	}
 	return newChessGame
 end

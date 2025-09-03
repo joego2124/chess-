@@ -326,7 +326,11 @@ Mouse.Button1Up:Connect(function()
 	local DisplayPart = SelectedPieceModel:FindFirstChild("Display") :: BasePart
 
 	-- Try to place part
-	if placePiece(mouseBoardCoord, SelectedPieceModel) then return end
+	if placePiece(mouseBoardCoord, SelectedPieceModel) then
+		-- unhoverPiece()
+		hideMoveHighlights()
+		return
+	end
 
 	-- Invalid placement, replace part to start
 	DisplayPart.CFrame = SelectedPieceModel.WorldPivot
@@ -373,7 +377,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 
 	-- Check mouse is hovering over player's piece
 	local hoveringPiece = ChessUtils.getPieceFromModel(PieceModel, currentChessGame.state)
-	if not hoveringPiece or hoveringPiece.Color ~= playerColor then
+	if not hoveringPiece or ((hoveringPiece.Color ~= playerColor) and false) then -- TODO: temp test
 		unhoverPiece()
 		return
 	end

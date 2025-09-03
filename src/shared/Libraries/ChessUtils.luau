@@ -1,6 +1,7 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local ChessTypes = require(ReplicatedStorage.Modules.Types.ChessTypes)
 
@@ -107,7 +108,6 @@ ChessUtils.pieceMoves = {
 			if file == 0 then continue end
 
 			-- Check en passant first
-			-- TODO: need to somehow mark as en passant attack
 			local attackCoord = piece.Coord + Vector2.new(0, file)
 			local attackedPiece = boardState[attackCoord.X][attackCoord.Y]
 			if
@@ -116,7 +116,7 @@ ChessUtils.pieceMoves = {
 				and attackedPiece.Color ~= piece.Color
 				and attackedPiece.CanEnPassant
 			then
-				table.insert(validCoords, attackCoord + Vector2.new(movementDir, file))
+				table.insert(validCoords, attackCoord + Vector2.new(movementDir, 0))
 			end
 
 			-- Normal attack
@@ -174,7 +174,28 @@ ChessUtils.pieceMoves = {
 	end,
 
 	King = function(piece: ChessTypes.Piece, boardState: ChessTypes.BoardState): { Vector2 }
-		return straightAndDiagonal(piece, boardState, 1)
+		-- Default valid moves' coords
+		local coords = straightAndDiagonal(piece, boardState, 1)
+
+		-- Helper func for checking if any pieces are in the way of castling
+		local function checkCastlingSquares(side: "Short" | "Long"): boolean
+			for i = piece.Coord.Y, (side == "Short" and #boardState or 1), (side == "Short" and 1 or -1) do
+				local p = boardState[piece.Color == "Black" and 8 or 1][i]
+				if p == piece or p.Type == "Rook" then continue end
+				if p.Type ~= "NA" then return false end
+			end
+			return true
+		end
+
+		-- Check for both long and short castling
+		if piece.CanCastleLong and checkCastlingSquares("Long") then
+			table.insert(coords, piece.Coord + Vector2.new(0, -2))
+		end
+		if piece.CanCastleShort and checkCastlingSquares("Short") then
+			table.insert(coords, piece.Coord + Vector2.new(0, 2))
+		end
+
+		return coords
 	end,
 } :: { [ChessTypes.PieceType]: moveFunc }
 
@@ -194,31 +215,63 @@ function ChessUtils.movePiece(
 	pieceMoved: ChessTypes.Piece,
 	coord: Vector2
 )
-	-- Copy over piece to board slot
-	local origCoord = pieceMoved.Coord
 	local targetPiece = boardState[coord.X][coord.Y]
-	for prop, _ in pairs(targetPiece) do
+
+	-- Check special rules first
+	if not pieceMoved.HasMoved then
+		-- Set pawn en passant flag
+		if pieceMoved.Type == "Pawn" and math.abs(coord.X - pieceMoved.Coord.X) > 1 then
+			pieceMoved.CanEnPassant = true
+		end
+
+		-- Handle king castling rules
+		if pieceMoved.Type == "King" then
+			pieceMoved.CanCastleLong = false
+			pieceMoved.CanCastleShort = false
+
+			local moveDiff = (coord - pieceMoved.Coord).Y
+			if math.abs(moveDiff) > 1 then
+				local rank = pieceMoved.Color == "White" and 1 or 8
+				ChessUtils.movePiece(
+					boardState,
+					boardState[rank][moveDiff > 0 and 8 or 1], -- moveDiff < 0 is short
+					Vector2.new(rank, moveDiff > 0 and coord.Y - 1 or coord.Y + 1)
+				)
+			end
+		end
+
+		-- Revoke castling privilege
+		if pieceMoved.Type == "Rook" then
+			local kingPiece: ChessTypes.Piece
+			for _, p in pairs(boardState[pieceMoved.Color == "White" and 1 or 8]) do
+				if p.Type == "King" then
+					kingPiece = p
+					break
+				end
+			end
+			if not kingPiece then
+				warn(`Trying to revoke castling privilege but {pieceMoved.Color}'s king not found!`)
+			end
+			if pieceMoved.Coord.Y == 1 and kingPiece then kingPiece.CanCastleLong = false end
+			if pieceMoved.Coord.Y == 8 and kingPiece then kingPiece.CanCastleShort = false end
+		end
+
+		pieceMoved.HasMoved = true
+	end
+
+	-- Handle en passant capture
+	if pieceMoved.Type == "Pawn" and targetPiece.Type == "NA" and coord.Y ~= pieceMoved.Coord.Y then
+		local capturedPiece = boardState[pieceMoved.Coord.X][coord.Y]
+		if capturedPiece and capturedPiece.Type == "Pawn" and capturedPiece.CanEnPassant then
+			ChessUtils.removePiece(boardState, capturedPiece)
+		end
+	end
+
+	-- Copy over piece to board slot
+	for prop, _ in pairs(pieceMoved) do
 		targetPiece[prop] = pieceMoved[prop]
 	end
 	targetPiece.Coord = coord
-
-	-- Check special rules
-	if not targetPiece.HasMoved then
-		if targetPiece.Type == "Pawn" then
-			if not targetPiece.HasMoved then targetPiece.CanEnPassant = true end
-			if not targetPiece.HasMoved then targetPiece.HasMoved = true end
-		end
-		if targetPiece.Type == "King" then
-			targetPiece.CanCastleLong = false
-			targetPiece.CanCastleShort = false
-		end
-		if targetPiece.Type == "Rook" then
-			if origCoord.Y == 1 then targetPiece.CanCastleLong = false end
-			if origCoord.Y == 8 then targetPiece.CanCastleShort = false end
-		end
-	end
-
-	targetPiece.HasMoved = true
 
 	ChessUtils.removePiece(boardState, pieceMoved)
 end
