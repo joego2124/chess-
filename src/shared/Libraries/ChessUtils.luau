@@ -82,6 +82,23 @@ local straightAndDiagonal = function(
 	return validCoords
 end
 
+-- TODO: add board state iterator
+function ChessUtils.isPieceAttacked(
+	boardState: ChessTypes.BoardState,
+	piece: ChessTypes.Piece
+): boolean
+	for _, rank in pairs(boardState) do
+		for _, p in pairs(rank) do
+			if p.Type == "NA" or p.Color == piece.Color then continue end
+			local attackingCoords = ChessUtils.getValidMoves(p, boardState)
+			for _, coord in pairs(attackingCoords) do
+				if coord == piece.Coord then return true end
+			end
+		end
+	end
+	return false
+end
+
 ChessUtils.pieceMoves = {
 
 	Pawn = function(piece: ChessTypes.Piece, boardState: ChessTypes.BoardState): { Vector2 }
@@ -187,11 +204,13 @@ ChessUtils.pieceMoves = {
 			return true
 		end
 
+		local kingIsUnderCheck = ChessUtils.isPieceAttacked(boardState, piece)
+
 		-- Check for both long and short castling
-		if piece.CanCastleLong and checkCastlingSquares("Long") then
+		if not kingIsUnderCheck and piece.CanCastleLong and checkCastlingSquares("Long") then
 			table.insert(coords, piece.Coord + Vector2.new(0, -2))
 		end
-		if piece.CanCastleShort and checkCastlingSquares("Short") then
+		if not kingIsUnderCheck and piece.CanCastleShort and checkCastlingSquares("Short") then
 			table.insert(coords, piece.Coord + Vector2.new(0, 2))
 		end
 

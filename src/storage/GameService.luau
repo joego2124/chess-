@@ -1,7 +1,7 @@
 --!strict
 
 -- local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
-local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/4P/8/8/8"
+local STARTING_FEN = "4q3/8/8/8/8/8/8/R3K2R"
 -- local STARTING_FEN = "8/8/8/3P/3R/8/3p/8"
 
 local HttpService = game:GetService("HttpService")
