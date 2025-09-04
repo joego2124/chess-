@@ -1,7 +1,7 @@
 --!strict
 
 -- local STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
-local STARTING_FEN = "4q3/8/8/8/8/8/8/R3K2R"
+local STARTING_FEN = "8/4P/8/8/8/8/4p/8"
 -- local STARTING_FEN = "8/8/8/3P/3R/8/3p/8"
 
 local HttpService = game:GetService("HttpService")
@@ -78,6 +78,10 @@ local function resetBoard() end
 
 local function updateBoard(newState: string) end
 
+local function switchTurns(chessGame: ChessTypes.ChessGame)
+	chessGame.turn = (chessGame.turn == "Black" and "White" or "Black") :: ChessTypes.PieceColor
+end
+
 local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: string)
 	-- Find player's game
 	local activeGame: ChessTypes.ChessGame
@@ -109,12 +113,13 @@ local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: 
 			clearEnPassantFlags(boardState, piece.Color)
 
 			-- Move piece
-			ChessUtils.movePiece(boardState, piece, coord)
-
-			-- Switch turns
-			activeGame.turn = (
-				PlayerColor == "Black" and "White" or "Black"
-			) :: ChessTypes.PieceColor
+			if not ChessUtils.movePiece(boardState, piece, coord) then
+				-- Normal turn end
+				switchTurns(activeGame)
+			else
+				-- Prompt promotion
+				GameService.RemoteEvent:FireClient(Player, "PromptPromotion", targetCoord, pieceUID)
+			end
 
 			-- Update players
 			if activeGame.BlackPlayer ~= "AI" then

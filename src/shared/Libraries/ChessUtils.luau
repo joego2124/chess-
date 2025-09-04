@@ -9,6 +9,10 @@ local ChessUtils = {}
 
 type moveFunc = (ChessTypes.Piece, ChessTypes.BoardState) -> { Vector2 }
 
+function ChessUtils.isCoordValid(coord: Vector2, boardState: ChessTypes.BoardState): boolean
+	return coord.X >= 1 and coord.X <= #boardState and coord.Y >= 1 and coord.Y <= #boardState[1]
+end
+
 local straightMoves = function(
 	piece: ChessTypes.Piece,
 	boardState: ChessTypes.BoardState,
@@ -20,7 +24,7 @@ local straightMoves = function(
 	for _, dir in pairs({ Vector2.xAxis, -Vector2.xAxis, Vector2.yAxis, -Vector2.yAxis }) do
 		for i = 1, magnitude do
 			local coord = origin + (dir * i)
-			if coord.X < 1 or coord.X > 8 or coord.Y < 1 or coord.Y > 8 then break end
+			if not ChessUtils.isCoordValid(coord, boardState) then break end
 			local coordPiece = boardState[coord.X][coord.Y]
 			if ChessUtils.isCoordEmpty(coord, boardState) then
 				table.insert(validCoords, coord)
@@ -48,7 +52,7 @@ local diagonalMoves = function(
 			if rankDir == 0 then continue end
 			for i = 1, magnitude do
 				local coord = origin + Vector2.new(rankDir * i, fileDir * i)
-				if coord.X < 1 or coord.X > 8 or coord.Y < 1 or coord.Y > 8 then break end
+				if ChessUtils.isCoordValid(coord, boardState) then break end
 				local coordPiece = boardState[coord.X][coord.Y]
 				if ChessUtils.isCoordEmpty(coord, boardState) then
 					table.insert(validCoords, coord)
@@ -107,15 +111,20 @@ ChessUtils.pieceMoves = {
 		-- Default movement
 		local validCoords = {}
 		local firstMoveCoord = piece.Coord + Vector2.new(movementDir, 0)
-		if firstMoveCoord.X < 1 or firstMoveCoord.X > 8 then return validCoords end
-		if ChessUtils.isCoordEmpty(firstMoveCoord, boardState) then
+		if
+			ChessUtils.isCoordValid(firstMoveCoord, boardState)
+			and ChessUtils.isCoordEmpty(firstMoveCoord, boardState)
+		then
 			table.insert(validCoords, firstMoveCoord)
 		end
 
 		-- Initial double move
 		if not piece.HasMoved and #validCoords > 0 then
 			local doubleMoveCoord = piece.Coord + Vector2.new(movementDir * 2, 0)
-			if ChessUtils.isCoordEmpty(doubleMoveCoord, boardState) then
+			if
+				ChessUtils.isCoordValid(doubleMoveCoord, boardState)
+				and ChessUtils.isCoordEmpty(doubleMoveCoord, boardState)
+			then
 				table.insert(validCoords, doubleMoveCoord)
 			end
 		end
@@ -126,6 +135,7 @@ ChessUtils.pieceMoves = {
 
 			-- Check en passant first
 			local attackCoord = piece.Coord + Vector2.new(0, file)
+			if not ChessUtils.isCoordValid(attackCoord, boardState) then continue end
 			local attackedPiece = boardState[attackCoord.X][attackCoord.Y]
 			if
 				attackedPiece
@@ -138,6 +148,7 @@ ChessUtils.pieceMoves = {
 
 			-- Normal attack
 			attackCoord = piece.Coord + Vector2.new(movementDir, file)
+			if not ChessUtils.isCoordValid(attackCoord, boardState) then continue end
 			attackedPiece = boardState[attackCoord.X][attackCoord.Y]
 			if
 				not attackedPiece
@@ -167,7 +178,7 @@ ChessUtils.pieceMoves = {
 		}
 		for _, offset in pairs(moveOffsets) do
 			local coord = piece.Coord + offset
-			if coord.X > 8 or coord.X < 1 or coord.Y > 8 or coord.Y < 1 then continue end
+			if not ChessUtils.isCoordValid(coord, boardState) then continue end
 			local targetSquare = boardState[coord.X][coord.Y]
 			if not ChessUtils.isPieceEmpty(targetSquare) and targetSquare.Color == piece.Color then
 				continue
@@ -233,7 +244,7 @@ function ChessUtils.movePiece(
 	boardState: ChessTypes.BoardState,
 	pieceMoved: ChessTypes.Piece,
 	coord: Vector2
-)
+): boolean
 	local targetPiece = boardState[coord.X][coord.Y]
 
 	-- Check special rules first
@@ -287,12 +298,18 @@ function ChessUtils.movePiece(
 	end
 
 	-- Copy over piece to board slot
+	-- local didTakeFlag = targetPiece.Type ~= "NA"
 	for prop, _ in pairs(pieceMoved) do
 		targetPiece[prop] = pieceMoved[prop]
 	end
 	targetPiece.Coord = coord
 
+	local canPromote = pieceMoved.Type == "Pawn"
+		and coord.X == (pieceMoved.Color == "White" and 8 or 1)
 	ChessUtils.removePiece(boardState, pieceMoved)
+
+	-- Handle promotion
+	return canPromote
 end
 
 function ChessUtils.removePiece(boardState: ChessTypes.BoardState, piece: ChessTypes.Piece)
@@ -318,6 +335,17 @@ function ChessUtils.getValidMoves(
 	boardState: ChessTypes.BoardState
 ): { Vector2 }
 	return ChessUtils.pieceMoves[piece.Type](piece, boardState)
+end
+
+function ChessUtils.isMoveValid(
+	piece: ChessTypes.Piece,
+	targetCoord: Vector2,
+	boardState: ChessTypes.BoardState
+): boolean
+	for _, coord in pairs(ChessUtils.getValidMoves(piece, boardState)) do
+		if coord == targetCoord then return true end
+	end
+	return false
 end
 
 -- Client side model util funcs

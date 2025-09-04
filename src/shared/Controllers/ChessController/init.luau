@@ -10,6 +10,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local ClientEffects = require(script.ClientEffects)
 local ChessUtils = require(ReplicatedStorage.Modules.Libraries.ChessUtils)
 local RichText = require(ReplicatedStorage.Modules.Libraries.RichText)
 local Spring = require(ReplicatedStorage.Modules.Libraries.Spring)
@@ -36,6 +37,10 @@ local ActiveMoveHighlights: { [string]: Highlight } = {}
 local BoardModel: Model
 local currentChessGame: ChessTypes.ChessGame
 
+-- TODO: Temp testing states for promotion
+local isPromoting = false
+local PromotionContainer: Model
+
 local function initMenuScreen()
 	-- Set up camera
 	local camFocus = MENU_CAM_POS + Vector3.zAxis * 50
@@ -45,32 +50,11 @@ local function initMenuScreen()
 	Camera.CFrame = CFrame.lookAt(MENU_CAM_POS, globalTargCamPos)
 
 	-- Set up menu pieces
-	local Pawn = ReplicatedStorage.Assets.Pieces.Pawn:Clone()
-	Pawn.Anchored = true
-	Pawn.Parent = MenuObjects
-	local PIECE_SPAWN_ANG_RAD = math.rad(30)
-	local PIECE_FLOAT_ANG_SCALE = 1
-	Pawn.CFrame = CFrame.new(camFocus)
-		* CFrame.Angles(
-			-PIECE_SPAWN_ANG_RAD / 2 + math.random() * PIECE_SPAWN_ANG_RAD,
-			-PIECE_SPAWN_ANG_RAD / 2 + math.random() * PIECE_SPAWN_ANG_RAD,
-			-PIECE_SPAWN_ANG_RAD / 2 + math.random() * PIECE_SPAWN_ANG_RAD
-		)
-	Pawn.Size = Pawn.Size * 2 / Pawn.Size.Y
-
-	-- Animate menu pieces
-	local origCF = Pawn.CFrame
-	local t = 0
-	RunService.Heartbeat:Connect(function(dt: number)
-		Pawn.CFrame = origCF
-			* CFrame.new(0, math.sin(tick() * 2) / 4, 0)
-			* CFrame.Angles(
-				math.noise(1, t) * PIECE_FLOAT_ANG_SCALE,
-				math.noise(2, t) * PIECE_FLOAT_ANG_SCALE,
-				math.noise(3, t) * PIECE_FLOAT_ANG_SCALE
-			)
-		t += dt / 4
-	end)
+	local PawnModel = ClientEffects.createPieceModel("Pawn")
+	local Pawn = PawnModel.PrimaryPart :: BasePart
+	PawnModel.Parent = MenuObjects
+	PawnModel:ScaleTo(0.5)
+	ClientEffects.floatPiece(PawnModel, CFrame.new(camFocus))
 
 	-- Create billboard label
 	local LabelGUI = ReplicatedStorage.Assets.UI.MenuPieceLabel:Clone()
@@ -137,19 +121,6 @@ local function initMenuScreen()
 	end)
 end
 
--- Calculate scale of pieces relative to board
-local PIECE_FULLNESS = 0.75
-local PIECE_SCALE_FACTOR = 1
-do
-	local d = DefaultSquare.Size.X
-	local largest = 0
-	for _, Piece in pairs(ReplicatedStorage.Assets.Pieces:GetChildren()) do
-		if not Piece:IsA("BasePart") then continue end
-		if Piece.Size.X > largest then largest = Piece.Size.X end
-	end
-	PIECE_SCALE_FACTOR = d / largest * PIECE_FULLNESS
-end
-
 local function populatePieces(Board: Model, boardState: ChessTypes.BoardState)
 	local BoardRoot = Board.PrimaryPart :: BasePart
 	local squareSize = (BoardRoot.Size / 8).X
@@ -159,13 +130,13 @@ local function populatePieces(Board: Model, boardState: ChessTypes.BoardState)
 			local PiecePart: BasePart? = ReplicatedStorage.Assets.Pieces:FindFirstChild(piece.Type)
 			if not PiecePart then continue end
 			PiecePart = PiecePart:Clone()
-			PiecePart.Color = ChessTypes.colors[piece.Color]
-			PiecePart.Size *= PIECE_SCALE_FACTOR
+			PiecePart.Color = ChessTypes.pieceColors[piece.Color]
+			PiecePart.Size *= ClientEffects.PIECE_SCALE_FACTOR
 			PiecePart.Name = "Display"
 
 			local PieceModel = Instance.new("Model", workspace)
 			local PieceHitbox = Instance.new("Part", PieceModel)
-			PieceHitbox.Size = (BoardRoot.Size / 8) * 0.85
+			PieceHitbox.Size = DefaultSquare.Size * 0.85
 			PieceHitbox.Transparency = 0.85
 			PieceHitbox.Anchored = true
 			PieceHitbox.CanCollide = false
@@ -190,7 +161,6 @@ end
 --[[
 	Mouse enter / leave player piece
 ]]
-
 local SelectedPieceModel: Model?
 local selectedPieceTargetCF: CFrame = CFrame.new()
 local HoveredPieceModel: Model?
@@ -316,7 +286,14 @@ Mouse.Button1Down:Connect(function()
 end)
 
 local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): boolean
-	if not ActiveMoveHighlights[tostring(targetCoord)] then return false end
+	local pieceUID = SelectedPieceModel:GetAttribute("UID") :: string
+	local selectedPiece = ChessUtils.getPieceFromUID(pieceUID, currentChessGame.state)
+	if
+		not selectedPiece
+		or not ChessUtils.isMoveValid(selectedPiece, targetCoord, currentChessGame.state)
+	then
+		return false
+	end
 	GameServiceRemote:FireServer("PlacePiece", targetCoord, SelectedPieceModel:GetAttribute("UID"))
 	return true
 end
@@ -327,8 +304,8 @@ Mouse.Button1Up:Connect(function()
 
 	-- Try to place part
 	if placePiece(mouseBoardCoord, SelectedPieceModel) then
-		-- unhoverPiece()
 		hideMoveHighlights()
+		ReplicatedStorage.Assets.Sounds.Move:Play()
 		return
 	end
 
@@ -341,6 +318,47 @@ local params = RaycastParams.new()
 params.FilterType = Enum.RaycastFilterType.Include
 
 UserInputService.InputChanged:Connect(function(input: InputObject)
+	-- Handle promotion selection
+	if isPromoting then
+		if
+			Mouse.Target
+			and Mouse.Target.Parent
+			and Mouse.Target:IsDescendantOf(PromotionContainer)
+		then
+			local PieceModel = Mouse.Target.Parent
+			if HoveredPieceModel == PieceModel then return end
+
+			PieceHighlight:Destroy()
+			HoveredPieceModel = PieceModel
+			local PiecePart = Mouse.Target.Parent:FindFirstChild("Display")
+			PieceHighlight = ClientEffects.highlightPiece(PiecePart)
+
+			TweenService:Create(
+				PiecePart,
+				TweenInfo.new(0.25, Enum.EasingStyle.Back),
+				{ Size = PiecePart:GetAttribute("OrigSize") * 1.5 }
+			):Play()
+
+			ReplicatedStorage.Assets.Sounds.Hover:Play()
+
+			return
+		end
+
+		PieceHighlight:Destroy()
+		if HoveredPieceModel then
+			local PiecePart = HoveredPieceModel:FindFirstChild("Display")
+			if PiecePart then
+				TweenService:Create(
+					PiecePart,
+					TweenInfo.new(HOVER_FLOAT_TIME_S),
+					{ Size = PiecePart:GetAttribute("OrigSize") :: Vector3 }
+				):Play()
+			end
+		end
+		HoveredPieceModel = nil
+		return
+	end
+
 	-- Update which board square coord is mouse in
 	local mouseHitPos = Mouse.Hit.Position
 	local camPos = Camera.CFrame.Position
@@ -388,25 +406,12 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	-- Apply hover effect to newly hovered piece
 	local PiecePart = PieceModel:FindFirstChild("Display")
 	if not PiecePart then return end
+	PieceHighlight = ClientEffects.highlightPiece(PieceModel)
 	HoveredPieceModel = PieceModel
-	PieceHighlight = Instance.new("Highlight")
-	PieceHighlight.Adornee = PiecePart
 	TweenService:Create(
 		PiecePart,
 		TweenInfo.new(HOVER_FLOAT_TIME_S),
 		{ CFrame = PieceModel.WorldPivot * CFrame.new(0, DefaultSquare.Size.Y / 2, 0) }
-	):Play()
-
-	-- Apply highlight effect to newly hovered piece
-	PieceHighlight.Parent = PiecePart
-	PieceHighlight.Adornee = PiecePart
-	PieceHighlight.Enabled = true
-	PieceHighlight.FillTransparency = 0.5
-	PieceHighlight.FillColor = ChessTypes.hoverHighlightColors.selectColor
-	TweenService:Create(
-		PieceHighlight,
-		TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, -1, true),
-		{ FillTransparency = 0.75 }
 	):Play()
 
 	-- Highlight moves
@@ -436,8 +441,11 @@ local function buildBoard()
 		RankModel.Name = tostring(rank)
 		for file = 1, 8 do
 			local Square = DefaultSquare:Clone()
+			local squareColor: ChessTypes.PieceColor = (
+				(rank + file) % 2 == 0 and "White" or "Black"
+			) :: ChessTypes.PieceColor
 			Square.CFrame = RootPart.CFrame * CFrame.new(d * 4.5 - file * d, 0, rank * d - d * 4.5)
-			Square.BrickColor = (rank + file) % 2 == 0 and BrickColor.Black() or BrickColor.White()
+			Square.Color = ChessTypes.boardColors[squareColor]
 			Square.Parent = RankModel
 			Square.Name = tostring(file)
 		end
@@ -494,7 +502,6 @@ local function setupGame(chessGame: ChessTypes.ChessGame)
 	ReferenceGUI.Parent = Player.PlayerGui
 	local projectedCF = fitPartToFrame(Board.PrimaryPart :: Part, ReferenceGUI.BoardArea)
 	local dist = (Camera.CFrame.Position - projectedCF.Position).Magnitude
-
 	local ANG_FROM_VERT_RAD = math.rad(25)
 	local boardCF = CFrame.new(MENU_CAM_POS)
 		* CFrame.new(
@@ -524,11 +531,18 @@ end
 function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
 	GameServiceRemote = RemotesFolder:FindFirstChild("GameServiceRemote", true) :: RemoteEvent
 
+	local function handlePromotion(targetCoord: Vector2, pieceUID: string)
+		PromotionContainer = ClientEffects.promptPromotion(PieceModels[pieceUID], targetCoord)
+		isPromoting = true
+	end
+
 	GameServiceRemote.OnClientEvent:Connect(function(eventName: string, ...)
 		if eventName == "StartGame" then
 			setupGame(...)
 		elseif eventName == "UpdateGame" then
 			updateGame(...)
+		elseif eventName == "PromptPromotion" then
+			handlePromotion(...)
 		end
 	end)
 end

@@ -24,7 +24,12 @@ export type ChessGame = {
 	BlackPlayer: Player | "AI",
 }
 
-ChessTypes.colors = {
+ChessTypes.boardColors = {
+	Black = Color3.fromRGB(120, 82, 64),
+	White = Color3.fromRGB(234, 184, 146),
+} :: { [PieceColor]: Color3 }
+
+ChessTypes.pieceColors = {
 	Black = Color3.fromRGB(30, 40, 50),
 	White = Color3.fromRGB(200, 200, 160),
 } :: { [PieceColor]: Color3 }
