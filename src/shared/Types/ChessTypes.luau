@@ -30,8 +30,8 @@ ChessTypes.boardColors = {
 } :: { [PieceColor]: Color3 }
 
 ChessTypes.pieceColors = {
-	Black = Color3.fromRGB(30, 40, 50),
-	White = Color3.fromRGB(200, 200, 160),
+	Black = Color3.fromRGB(60, 40, 30),
+	White = Color3.fromRGB(220, 200, 160),
 } :: { [PieceColor]: Color3 }
 
 ChessTypes.fenLookUp = {
@@ -43,8 +43,16 @@ ChessTypes.fenLookUp = {
 	k = "King",
 } :: { [string]: PieceType }
 
+ChessTypes.PROMOTION_OPTIONS = {
+	"Knight",
+	"Bishop",
+	"Rook",
+	"Queen",
+} :: { PieceType }
+
 ChessTypes.hoverHighlightColors = {
 	selectColor = Color3.fromRGB(0, 170, 255),
+	pieceMoveSquareColor = Color3.fromRGB(255, 200, 0),
 }
 
 ChessTypes.menuColors = {

@@ -10,7 +10,8 @@ local ChessUtils = {}
 type moveFunc = (ChessTypes.Piece, ChessTypes.BoardState) -> { Vector2 }
 
 function ChessUtils.isCoordValid(coord: Vector2, boardState: ChessTypes.BoardState): boolean
-	return coord.X >= 1 and coord.X <= #boardState and coord.Y >= 1 and coord.Y <= #boardState[1]
+	return ((coord.X >= 1) and (coord.X <= #boardState))
+		and ((coord.Y >= 1) and (coord.Y <= #boardState[1]))
 end
 
 local straightMoves = function(
@@ -52,7 +53,7 @@ local diagonalMoves = function(
 			if rankDir == 0 then continue end
 			for i = 1, magnitude do
 				local coord = origin + Vector2.new(rankDir * i, fileDir * i)
-				if ChessUtils.isCoordValid(coord, boardState) then break end
+				if not ChessUtils.isCoordValid(coord, boardState) then break end
 				local coordPiece = boardState[coord.X][coord.Y]
 				if ChessUtils.isCoordEmpty(coord, boardState) then
 					table.insert(validCoords, coord)
@@ -93,7 +94,9 @@ function ChessUtils.isPieceAttacked(
 ): boolean
 	for _, rank in pairs(boardState) do
 		for _, p in pairs(rank) do
-			if p.Type == "NA" or p.Color == piece.Color then continue end
+			if p.Type == "NA" or p.Type == "King" or p == piece or p.Color == piece.Color then
+				continue
+			end
 			local attackingCoords = ChessUtils.getValidMoves(p, boardState)
 			for _, coord in pairs(attackingCoords) do
 				if coord == piece.Coord then return true end
@@ -376,6 +379,10 @@ function ChessUtils.getPieceFromUID(
 	end
 	return
 end
+
+-- function ChessUtils.getModelFromPiece()
+
+-- end
 
 function ChessUtils.getBoardSquareFromCoord(coord: Vector2, Board: Model): BasePart
 	return (Board:FindFirstChild(tostring(coord.X)) :: BasePart):FindFirstChild(

@@ -11,6 +11,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local ClientEffects = require(script.ClientEffects)
+local CameraController = require(script.Parent.CameraController)
 local ChessUtils = require(ReplicatedStorage.Modules.Libraries.ChessUtils)
 local RichText = require(ReplicatedStorage.Modules.Libraries.RichText)
 local Spring = require(ReplicatedStorage.Modules.Libraries.Spring)
@@ -43,18 +44,15 @@ local PromotionContainer: Model
 
 local function initMenuScreen()
 	-- Set up camera
-	local camFocus = MENU_CAM_POS + Vector3.zAxis * 50
-	Camera.FieldOfView = 15
-	Camera.CameraType = Enum.CameraType.Scriptable
-	globalTargCamPos = camFocus
-	Camera.CFrame = CFrame.lookAt(MENU_CAM_POS, globalTargCamPos)
+	CameraController.camFocus = MENU_CAM_POS + Vector3.zAxis * 50
+	CameraController.camPos = MENU_CAM_POS
 
 	-- Set up menu pieces
-	local PawnModel = ClientEffects.createPieceModel("Pawn")
+	local PawnModel = ClientEffects.createPieceModel("Pawn", "White", "NA")
 	local Pawn = PawnModel.PrimaryPart :: BasePart
 	PawnModel.Parent = MenuObjects
-	PawnModel:ScaleTo(0.5)
-	ClientEffects.floatPiece(PawnModel, CFrame.new(camFocus))
+	PawnModel:ScaleTo(0.5 / ClientEffects.PIECE_SCALE_FACTOR)
+	ClientEffects.floatPiece(PawnModel, CFrame.new(CameraController.camFocus))
 
 	-- Create billboard label
 	local LabelGUI = ReplicatedStorage.Assets.UI.MenuPieceLabel:Clone()
@@ -65,7 +63,7 @@ local function initMenuScreen()
 
 	local Frame = LabelGUI.CanvasGroup.Frame
 	local textObject
-	task.delay(0.1, function()
+	task.delay(0.15, function()
 		local text = "play!"
 		textObject = RichText:New(Frame, text, {
 			Looping = true,
@@ -127,23 +125,14 @@ local function populatePieces(Board: Model, boardState: ChessTypes.BoardState)
 	local boardOrigin = BoardRoot.CFrame
 	for rank, rankTab in ipairs(boardState) do
 		for file, piece in ipairs(rankTab) do
-			local PiecePart: BasePart? = ReplicatedStorage.Assets.Pieces:FindFirstChild(piece.Type)
-			if not PiecePart then continue end
-			PiecePart = PiecePart:Clone()
-			PiecePart.Color = ChessTypes.pieceColors[piece.Color]
-			PiecePart.Size *= ClientEffects.PIECE_SCALE_FACTOR
-			PiecePart.Name = "Display"
-
-			local PieceModel = Instance.new("Model", workspace)
-			local PieceHitbox = Instance.new("Part", PieceModel)
-			PieceHitbox.Size = DefaultSquare.Size * 0.85
-			PieceHitbox.Transparency = 0.85
-			PieceHitbox.Anchored = true
-			PieceHitbox.CanCollide = false
-			PiecePart.Parent = PieceModel
-			PieceModel.PrimaryPart = PieceHitbox
-			PieceModel:SetAttribute("UID", piece.UID)
-			PieceModel.Name = piece.Type
+			if piece.Type == "NA" then continue end
+			if not ReplicatedStorage.Assets.Pieces:FindFirstChild(piece.Type) then
+				warn(`Piece type {piece.Type} from ({rank}, {file}) not found!`)
+				continue
+			end
+			local PieceModel = ClientEffects.createPieceModel(piece.Type, piece.Color, piece.UID)
+			local PiecePart = PieceModel:FindFirstChild("Display") :: BasePart
+			PieceModel.Parent = workspace
 			PieceModel:PivotTo(
 				boardOrigin
 					* CFrame.new(
@@ -213,7 +202,7 @@ local function highlightMoves(
 	end)
 end
 
-local HOVER_FLOAT_TIME_S = 0.1
+-- Helper function to place piece at mouse cf relative to board
 local function getSelectedPieceMouseCF(PieceModel: Model)
 	local camPos = Camera.CFrame.Position
 	local hoverRootPos = BoardModel.WorldPivot + Vector3.new(0, DefaultSquare.Size.Y * 3.5)
@@ -227,16 +216,22 @@ local function getSelectedPieceMouseCF(PieceModel: Model)
 	) * CFrame.new(0, -DisplayPart.Size.Y / 2, 0)
 end
 
+local HOVER_FLOAT_TIME_S = 0.1
 local function unhoverPiece()
 	if not HoveredPieceModel or not HoveredPieceModel:FindFirstChild("Display") then return end
+	local Display = HoveredPieceModel:FindFirstChild("Display") :: BasePart
+
 	PieceHighlight:Destroy()
-	TweenService:Create(
-		HoveredPieceModel:FindFirstChild("Display"),
-		TweenInfo.new(HOVER_FLOAT_TIME_S),
-		{ CFrame = HoveredPieceModel.WorldPivot }
-	):Play()
-	HoveredPieceModel = nil
 	hideMoveHighlights()
+	TweenService
+		:Create(
+			Display,
+			TweenInfo.new(HOVER_FLOAT_TIME_S),
+			{ CFrame = HoveredPieceModel.WorldPivot }
+		)
+		:Play()
+
+	HoveredPieceModel = nil
 end
 
 -- Piece dragging
@@ -244,15 +239,24 @@ local PIECE_ROT_LIMIT_RAD = math.pi / 3
 local prevSelectedPiecePos = Vector3.zero
 local rotSpring = Spring.new(Vector2.zero)
 local posSpring = Spring.new(Vector3.zero)
-rotSpring.Damper = 0.5
+local sizeSpring = Spring.new(Vector3.zero)
+rotSpring.Damper = 0.4
 rotSpring.Speed = 20
 posSpring.Damper = 1
 posSpring.Speed = 30
+sizeSpring.Damper = 0.25
+sizeSpring.Speed = 25
 local tweenedVel = Vector3.zero -- intermediary value required for lerp
 
 RunService.Heartbeat:Connect(function(dt: number)
 	if not SelectedPieceModel then return end
 	local DisplayPart = SelectedPieceModel:FindFirstChild("Display") :: BasePart
+
+	-- Handle promotion UI piece selection
+	if isPromoting then
+		DisplayPart.Size = sizeSpring.Position
+		return
+	end
 
 	-- Update vel from mouse movement
 	local offsetCF = CFrame.new(0, DisplayPart.Size.Y / 2, 0)
@@ -276,15 +280,6 @@ RunService.Heartbeat:Connect(function(dt: number)
 	prevSelectedPiecePos = selectedPieceTargetCF.Position
 end)
 
-Mouse.Button1Down:Connect(function()
-	if not HoveredPieceModel then return end
-	SelectedPieceModel = HoveredPieceModel
-	selectedPieceTargetCF = getSelectedPieceMouseCF(HoveredPieceModel)
-	prevSelectedPiecePos = selectedPieceTargetCF.Position
-	posSpring.Position = prevSelectedPiecePos
-	rotSpring.Position = Vector2.zero
-end)
-
 local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): boolean
 	local pieceUID = SelectedPieceModel:GetAttribute("UID") :: string
 	local selectedPiece = ChessUtils.getPieceFromUID(pieceUID, currentChessGame.state)
@@ -298,20 +293,36 @@ local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): bool
 	return true
 end
 
+Mouse.Button1Down:Connect(function()
+	if not HoveredPieceModel then return end
+	SelectedPieceModel = HoveredPieceModel
+	selectedPieceTargetCF = getSelectedPieceMouseCF(HoveredPieceModel)
+	prevSelectedPiecePos = selectedPieceTargetCF.Position
+	posSpring.Position = prevSelectedPiecePos
+	rotSpring.Position = Vector2.zero
+end)
+
 Mouse.Button1Up:Connect(function()
-	if not SelectedPieceModel then return end
+	if
+		not SelectedPieceModel
+		or not ChessUtils.isCoordValid(mouseBoardCoord, currentChessGame.state)
+	then
+		return
+	end
 	local DisplayPart = SelectedPieceModel:FindFirstChild("Display") :: BasePart
 
-	-- Try to place part
+	-- Try to place piece
+	local isCapture = not ChessUtils.isCoordEmpty(mouseBoardCoord, currentChessGame.state)
 	if placePiece(mouseBoardCoord, SelectedPieceModel) then
 		hideMoveHighlights()
-		ReplicatedStorage.Assets.Sounds.Move:Play()
+		ReplicatedStorage.Assets.Sounds[isCapture and "Take" or "Move"]:Play()
 		return
 	end
 
 	-- Invalid placement, replace part to start
 	DisplayPart.CFrame = SelectedPieceModel.WorldPivot
 	SelectedPieceModel = nil
+	ReplicatedStorage.Assets.Sounds.Hover:Play()
 end)
 
 local params = RaycastParams.new()
@@ -330,32 +341,48 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 
 			PieceHighlight:Destroy()
 			HoveredPieceModel = PieceModel
+			SelectedPieceModel = PieceModel
 			local PiecePart = Mouse.Target.Parent:FindFirstChild("Display")
 			PieceHighlight = ClientEffects.highlightPiece(PiecePart)
 
-			TweenService:Create(
-				PiecePart,
-				TweenInfo.new(0.25, Enum.EasingStyle.Back),
-				{ Size = PiecePart:GetAttribute("OrigSize") * 1.5 }
-			):Play()
+			local origSize = PiecePart:GetAttribute("OrigSize") :: Vector3
+			sizeSpring.Position = PiecePart.Size
+			sizeSpring.Target = origSize * 2
 
-			ReplicatedStorage.Assets.Sounds.Hover:Play()
+			-- ReplicatedStorage.Assets.Sounds.Hover:Play()
+			ReplicatedStorage.Assets.Sounds.Bubble:Play()
+
+			for _, Model in pairs(PromotionContainer:GetChildren()) do
+				if Model == PieceModel or not Model:IsA("Model") then continue end
+				local Display = Model:FindFirstChild("Display") :: BasePart
+				TweenService:Create(
+					Display,
+					TweenInfo.new(HOVER_FLOAT_TIME_S * 2),
+					{ Size = Display:GetAttribute("OrigSize") :: Vector3 }
+				):Play()
+			end
 
 			return
 		end
 
+		SelectedPieceModel = nil
 		PieceHighlight:Destroy()
 		if HoveredPieceModel then
 			local PiecePart = HoveredPieceModel:FindFirstChild("Display")
 			if PiecePart then
 				TweenService:Create(
 					PiecePart,
-					TweenInfo.new(HOVER_FLOAT_TIME_S),
+					TweenInfo.new(HOVER_FLOAT_TIME_S * 2),
 					{ Size = PiecePart:GetAttribute("OrigSize") :: Vector3 }
 				):Play()
 			end
 		end
 		HoveredPieceModel = nil
+		return
+	end
+
+	--TODO: temp way to ignore menu UI pieces
+	if Mouse.Target and Mouse.Target.Parent and Mouse.Target.Parent:GetAttribute("UID") == "NA" then
 		return
 	end
 
@@ -374,6 +401,11 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	-- State for when piece is already being dragged, skip piece hover checks
 	if SelectedPieceModel and Mouse.Hit then
 		selectedPieceTargetCF = getSelectedPieceMouseCF(SelectedPieceModel)
+		for coordString, Highlight in pairs(ActiveMoveHighlights) do
+			Highlight.FillColor = coordString == tostring(mouseBoardCoord)
+					and ChessTypes.hoverHighlightColors.pieceMoveSquareColor
+				or ChessTypes.hoverHighlightColors.selectColor
+		end
 		return
 	end
 
@@ -408,11 +440,10 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	if not PiecePart then return end
 	PieceHighlight = ClientEffects.highlightPiece(PieceModel)
 	HoveredPieceModel = PieceModel
-	TweenService:Create(
-		PiecePart,
-		TweenInfo.new(HOVER_FLOAT_TIME_S),
-		{ CFrame = PieceModel.WorldPivot * CFrame.new(0, DefaultSquare.Size.Y / 2, 0) }
-	):Play()
+	TweenService:Create(PiecePart, TweenInfo.new(HOVER_FLOAT_TIME_S), {
+		CFrame = PieceModel.WorldPivot * CFrame.new(0, DefaultSquare.Size.Y / 2, 0),
+		-- Size =
+	}):Play()
 
 	-- Highlight moves
 	highlightMoves(hoveringPiece :: ChessTypes.Piece, currentChessGame.state, BoardModel)
@@ -421,45 +452,12 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	ReplicatedStorage.Assets.Sounds.Hover:Play()
 end)
 
-local function buildBoard()
-	local Board = Instance.new("Model", workspace)
-	Board.Name = "Board"
-
-	-- Create root part for centering board
-	local d = DefaultSquare.Size.X
-	local RootPart = Instance.new("Part", Board)
-	RootPart.Name = "Root"
-	RootPart.Size = Vector3.new(d * 8, d, d * 8)
-	RootPart.Transparency = 1
-	RootPart.Anchored = true
-	RootPart.CanCollide = false
-	Board.PrimaryPart = RootPart
-
-	-- Create board
-	for rank = 1, 8 do
-		local RankModel = Instance.new("Model", Board)
-		RankModel.Name = tostring(rank)
-		for file = 1, 8 do
-			local Square = DefaultSquare:Clone()
-			local squareColor: ChessTypes.PieceColor = (
-				(rank + file) % 2 == 0 and "White" or "Black"
-			) :: ChessTypes.PieceColor
-			Square.CFrame = RootPart.CFrame * CFrame.new(d * 4.5 - file * d, 0, rank * d - d * 4.5)
-			Square.Color = ChessTypes.boardColors[squareColor]
-			Square.Parent = RankModel
-			Square.Name = tostring(file)
-		end
-	end
-
-	return Board
-end
-
 local function setupGame(chessGame: ChessTypes.ChessGame)
 	-- Hide menu objects
 	MenuObjects.Parent = Lighting
 
 	-- Create board
-	local Board = buildBoard()
+	local Board = ClientEffects.buildBoard()
 	BoardModel = Board
 	for _, RankModel in pairs(BoardModel:GetChildren()) do
 		if not RankModel:IsA("Model") then continue end
@@ -468,50 +466,21 @@ local function setupGame(chessGame: ChessTypes.ChessGame)
 		end
 	end
 
-	-- Change camera
-	local fitPartToFrame = function(Part: BasePart, Frame: Frame): CFrame
-		local topBarOffset = GuiService.TopbarInset.Height
-		local framePosX = Frame.AbsolutePosition.X + Frame.AbsoluteSize.X / 2
-		local framePosY = (Frame.AbsolutePosition.Y + topBarOffset) + Frame.AbsoluteSize.Y / 2
-
-		local zBaseOffset = Part.Size.X
-			/ (
-				2
-				* math.tan(math.rad(Camera.FieldOfView) / 2)
-				* (Frame.AbsoluteSize.Y / Camera.ViewportSize.Y)
-			)
-
-		local unitRay = Camera:ViewportPointToRay(framePosX, framePosY, zBaseOffset)
-
-		unitRay = Camera:ViewportPointToRay(
-			framePosX,
-			framePosY,
-			zBaseOffset / math.cos(unitRay.Direction:Angle(Camera.CFrame.LookVector))
-		)
-
-		-- Apply and fix CFrame towards camera
-		local baseCF = CFrame.new(unitRay.Origin)
-		local x, y, z = Camera.CFrame:ToEulerAnglesXYZ()
-		baseCF *= CFrame.Angles(x, y, z)
-		baseCF *= CFrame.Angles(0, math.pi, 0) -- Flip part around so front faces camera
-
-		return baseCF
-	end
-
+	-- Set board CFrame and camera focus
 	local ReferenceGUI = ReplicatedStorage.Assets.UI.ReferenceGUI
 	ReferenceGUI.Parent = Player.PlayerGui
-	local projectedCF = fitPartToFrame(Board.PrimaryPart :: Part, ReferenceGUI.BoardArea)
+	local projectedCF =
+		CameraController.fitPartToFrame(Board.PrimaryPart :: Part, ReferenceGUI.BoardArea)
 	local dist = (Camera.CFrame.Position - projectedCF.Position).Magnitude
-	local ANG_FROM_VERT_RAD = math.rad(25)
 	local boardCF = CFrame.new(MENU_CAM_POS)
 		* CFrame.new(
-			0, -- -dist * math.sin(ANG_FROM_VERT_RAD),
-			-dist * math.cos(ANG_FROM_VERT_RAD),
-			dist * math.sin(ANG_FROM_VERT_RAD)
+			0, -- -dist * math.sin(ClientEffects.ANG_FROM_VERT_RAD),
+			-dist * math.cos(ClientEffects.ANG_FROM_VERT_RAD),
+			dist * math.sin(ClientEffects.ANG_FROM_VERT_RAD)
 		)
 	Board:PivotTo(boardCF)
 
-	globalTargCamPos = boardCF.Position
+	CameraController.camFocus = boardCF.Position
 
 	-- Populate initial board pieces from given state
 	populatePieces(Board, chessGame.state)
@@ -532,7 +501,10 @@ function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
 	GameServiceRemote = RemotesFolder:FindFirstChild("GameServiceRemote", true) :: RemoteEvent
 
 	local function handlePromotion(targetCoord: Vector2, pieceUID: string)
-		PromotionContainer = ClientEffects.promptPromotion(PieceModels[pieceUID], targetCoord)
+		PromotionContainer = ClientEffects.promptPromotion(
+			ChessUtils.getPieceFromUID(pieceUID, currentChessGame.state) :: ChessTypes.Piece,
+			targetCoord
+		)
 		isPromoting = true
 	end
 
@@ -547,7 +519,6 @@ function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
 	end)
 end
 
-local CAMERA_PAN_FACTOR = 16
 function ChessController.start()
 	-- Freeze character
 	local Char = Player.Character or Player.CharacterAdded:Wait()
@@ -557,21 +528,7 @@ function ChessController.start()
 	-- Init menu
 	initMenuScreen()
 
-	-- Camera loop
-	local screenSize = Camera.ViewportSize
-	local screenCenter = screenSize / 2
-	RunService.Heartbeat:Connect(function(dt: number)
-		local camFocusDist = (MENU_CAM_POS - globalTargCamPos).Magnitude
-		local mouseDriftMag = camFocusDist * 0.0075
-		local mousePos = UserInputService:GetMouseLocation() - screenCenter
-		local mouseOffsetCF = CFrame.new(
-			mousePos.X / screenSize.X * mouseDriftMag,
-			-mousePos.Y / screenSize.Y * mouseDriftMag,
-			0
-		)
-		local targCamCF = CFrame.lookAt(MENU_CAM_POS, globalTargCamPos) * mouseOffsetCF
-		Camera.CFrame = Camera.CFrame:Lerp(targCamCF, 1 - math.exp(-CAMERA_PAN_FACTOR * dt))
-	end)
+	CameraController.changeState("Menu")
 end
 
 return ChessController
