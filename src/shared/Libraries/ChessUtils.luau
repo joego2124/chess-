@@ -235,7 +235,7 @@ ChessUtils.pieceMoves = {
 function ChessUtils.emptyPiece(rank: number, file: number): ChessTypes.Piece
 	local piece: ChessTypes.Piece = {
 		Type = "NA",
-		Color = "Black",
+		Color = "Env",
 		UID = "",
 		Coord = Vector2.new(rank, file),
 		HasMoved = false,
@@ -248,8 +248,6 @@ function ChessUtils.movePiece(
 	pieceMoved: ChessTypes.Piece,
 	coord: Vector2
 ): boolean
-	local targetPiece = boardState[coord.X][coord.Y]
-
 	-- Check special rules first
 	if not pieceMoved.HasMoved then
 		-- Set pawn en passant flag
@@ -265,6 +263,7 @@ function ChessUtils.movePiece(
 			local moveDiff = (coord - pieceMoved.Coord).Y
 			if math.abs(moveDiff) > 1 then
 				local rank = pieceMoved.Color == "White" and 1 or 8
+				-- Move corresponding rook
 				ChessUtils.movePiece(
 					boardState,
 					boardState[rank][moveDiff > 0 and 8 or 1], -- moveDiff < 0 is short
@@ -293,38 +292,45 @@ function ChessUtils.movePiece(
 	end
 
 	-- Handle en passant capture
-	if pieceMoved.Type == "Pawn" and targetPiece.Type == "NA" and coord.Y ~= pieceMoved.Coord.Y then
+	if
+		pieceMoved.Type == "Pawn"
+		and ChessUtils.isCoordEmpty(coord, boardState)
+		and coord.Y ~= pieceMoved.Coord.Y
+	then
 		local capturedPiece = boardState[pieceMoved.Coord.X][coord.Y]
 		if capturedPiece and capturedPiece.Type == "Pawn" and capturedPiece.CanEnPassant then
 			ChessUtils.removePiece(boardState, capturedPiece)
 		end
 	end
 
-	-- Copy over piece to board slot
-	-- local didTakeFlag = targetPiece.Type ~= "NA"
-	for prop, _ in pairs(pieceMoved) do
-		targetPiece[prop] = pieceMoved[prop]
-	end
-	targetPiece.Coord = coord
-
+	-- Keep track of promotion flag
 	local canPromote = pieceMoved.Type == "Pawn"
 		and coord.X == (pieceMoved.Color == "White" and 8 or 1)
-	ChessUtils.removePiece(boardState, pieceMoved)
 
-	-- Handle promotion
+	-- Copy over piece to board slot
+	ChessUtils.replacePiece(boardState, coord, pieceMoved)
+
 	return canPromote
 end
 
+function ChessUtils.replacePiece(
+	boardState: ChessTypes.BoardState,
+	coord: Vector2,
+	newPiece: ChessTypes.Piece
+)
+	boardState[coord.X][coord.Y] = newPiece
+	if coord ~= newPiece.Coord then ChessUtils.removePiece(boardState, newPiece) end
+	newPiece.Coord = coord
+end
+
 function ChessUtils.removePiece(boardState: ChessTypes.BoardState, piece: ChessTypes.Piece)
-	for rank = 1, 8 do
-		for file = 1, 8 do
-			local p = boardState[rank][file]
-			if p ~= piece then continue end
-			p.Type = "NA"
-			p.UID = ""
-			return
-		end
-	end
+	boardState[piece.Coord.X][piece.Coord.Y] = {
+		Type = "NA",
+		Color = "Env",
+		UID = "",
+		Coord = piece.Coord,
+		HasMoved = false,
+	}
 end
 
 function ChessUtils.isPieceEmpty(piece: ChessTypes.Piece): boolean return piece.Type == "NA" end

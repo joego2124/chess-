@@ -120,6 +120,39 @@ function ClientEffects.highlightPiece(PieceDisplayPart: BasePart): Highlight
 	return PieceHighlight
 end
 
+function ClientEffects.populatePieces(
+	Board: Model,
+	boardState: ChessTypes.BoardState
+): { [string]: Model }
+	local BoardRoot = Board.PrimaryPart :: BasePart
+	local squareSize = (BoardRoot.Size / 8).X
+	local boardOrigin = BoardRoot.CFrame
+	local PieceModels = {}
+	for rank, rankTab in ipairs(boardState) do
+		for file, piece in ipairs(rankTab) do
+			if piece.Type == "NA" then continue end
+			if not ReplicatedStorage.Assets.Pieces:FindFirstChild(piece.Type) then
+				warn(`Piece type {piece.Type} from ({rank}, {file}) not found!`)
+				continue
+			end
+			local PieceModel = ClientEffects.createPieceModel(piece.Type, piece.Color, piece.UID)
+			local PiecePart = PieceModel:FindFirstChild("Display") :: BasePart
+			PieceModel.Parent = workspace
+			PieceModel:PivotTo(
+				boardOrigin
+					* CFrame.new(
+						squareSize * 4.5 - file * squareSize,
+						squareSize / 2 + PiecePart.Size.Y / 2,
+						rank * squareSize - squareSize * 4.5
+					)
+			)
+			PiecePart.CFrame = PieceModel.WorldPivot
+			PieceModels[piece.UID] = PieceModel
+		end
+	end
+	return PieceModels
+end
+
 function ClientEffects.createPieceModel(
 	pieceType: ChessTypes.PieceType,
 	pieceColor: ChessTypes.PieceColor,

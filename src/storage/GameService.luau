@@ -47,7 +47,11 @@ local function fenToBoardState(fen: string): ChessTypes.BoardState
 		-- Alpha char case, create new piece
 		local piece: ChessTypes.Piece = {
 			Type = ChessTypes.fenLookUp[string.lower(c)],
-			Color = (string.match(c, "%u") and "White" or "Black") :: ChessTypes.PieceColor,
+			Color = (
+					string.match(c, "%u") and "White" or (
+						string.match(c, "%l") and "Black" or "Env"
+					)
+				) :: ChessTypes.PieceColor,
 			UID = HttpService:GenerateGUID(),
 			Coord = Vector2.new(rank, file),
 			HasMoved = false,
@@ -73,17 +77,12 @@ local function clearEnPassantFlags(boardState: ChessTypes.BoardState, color: Che
 	end
 end
 
-local function resetBoard() end
-
-local function updateBoard(newState: string) end
-
 local function switchTurns(chessGame: ChessTypes.ChessGame)
 	chessGame.turn = (chessGame.turn == "Black" and "White" or "Black") :: ChessTypes.PieceColor
 end
 
-local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: string)
-	-- Find player's game
-	local activeGame: ChessTypes.ChessGame
+local function getGameFromPlayer(Player: Player): ChessTypes.ChessGame
+	local chessGame: ChessTypes.ChessGame
 	local PlayerColor: ChessTypes.PieceColor
 	for _, game in pairs(GameService.games) do
 		if game.WhitePlayer == Player or game.BlackPlayer == Player then
@@ -94,10 +93,25 @@ local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: 
 				warn(`{Player} attempted to request move when out of turn!`)
 				-- return
 			end
-			activeGame = game
+			chessGame = game
 			break
 		end
 	end
+	return chessGame
+end
+
+local function updateGameForPlayers(chessGame: ChessTypes.ChessGame)
+	if chessGame.BlackPlayer ~= "AI" then
+		GameService.RemoteEvent:FireClient(chessGame.BlackPlayer, "UpdateGame", chessGame)
+	end
+	if chessGame.WhitePlayer ~= "AI" then
+		GameService.RemoteEvent:FireClient(chessGame.WhitePlayer, "UpdateGame", chessGame)
+	end
+end
+
+local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: string)
+	-- Find player's game
+	local activeGame = getGameFromPlayer(Player)
 	if not activeGame then return end
 	local boardState = activeGame.state
 
@@ -117,19 +131,31 @@ local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: 
 				switchTurns(activeGame)
 			else
 				-- Prompt promotion
+				activeGame.promotingPiece = ChessUtils.getPieceFromUID(pieceUID, boardState)
 				GameService.RemoteEvent:FireClient(Player, "PromptPromotion", targetCoord, pieceUID)
 			end
 
-			-- Update players
-			if activeGame.BlackPlayer ~= "AI" then
-				GameService.RemoteEvent:FireClient(activeGame.BlackPlayer, "UpdateGame", activeGame)
-			end
-			if activeGame.WhitePlayer ~= "AI" then
-				GameService.RemoteEvent:FireClient(activeGame.WhitePlayer, "UpdateGame", activeGame)
-			end
+			-- Update players' games
+			updateGameForPlayers(activeGame)
 			return
 		end
 	end
+end
+
+local function promotePiece(Player: Player, pieceType: ChessTypes.PieceType)
+	-- Find player's game
+	local activeGame = getGameFromPlayer(Player)
+	if not activeGame or not activeGame.promotingPiece then return end
+	local boardState = activeGame.state
+	ChessUtils.replacePiece(boardState, activeGame.promotingPiece.Coord, {
+		Type = pieceType,
+		Color = (Player == activeGame.WhitePlayer and "White" or "Black") :: ChessTypes.PieceColor,
+		UID = HttpService:GenerateGUID(),
+		Coord = activeGame.promotingPiece.Coord,
+		HasMoved = false,
+	})
+	activeGame.promotingPiece = nil
+	updateGameForPlayers(activeGame)
 end
 
 function GameService.init(RuntimeFolder: Folder, RemotesFolder: Folder)
@@ -143,6 +169,8 @@ function GameService.init(RuntimeFolder: Folder, RemotesFolder: Folder)
 			GameService.RemoteEvent:FireClient(Player, "StartGame", newGame)
 		elseif eventName == "PlacePiece" then
 			playerPlacePiece(Player, ...)
+		elseif eventName == "PromotePiece" then
+			promotePiece(Player, ...)
 		end
 	end)
 end

@@ -3,7 +3,7 @@
 local ChessTypes = {}
 
 export type PieceType = "Pawn" | "Knight" | "Bishop" | "Rook" | "Queen" | "King" | "NA"
-export type PieceColor = "White" | "Black"
+export type PieceColor = "White" | "Black" | "Env"
 export type Piece = {
 	Type: PieceType,
 	Color: PieceColor,
@@ -22,6 +22,7 @@ export type ChessGame = {
 	turn: PieceColor,
 	WhitePlayer: Player | "AI",
 	BlackPlayer: Player | "AI",
+	promotingPiece: Piece?,
 }
 
 ChessTypes.boardColors = {

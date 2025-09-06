@@ -119,34 +119,6 @@ local function initMenuScreen()
 	end)
 end
 
-local function populatePieces(Board: Model, boardState: ChessTypes.BoardState)
-	local BoardRoot = Board.PrimaryPart :: BasePart
-	local squareSize = (BoardRoot.Size / 8).X
-	local boardOrigin = BoardRoot.CFrame
-	for rank, rankTab in ipairs(boardState) do
-		for file, piece in ipairs(rankTab) do
-			if piece.Type == "NA" then continue end
-			if not ReplicatedStorage.Assets.Pieces:FindFirstChild(piece.Type) then
-				warn(`Piece type {piece.Type} from ({rank}, {file}) not found!`)
-				continue
-			end
-			local PieceModel = ClientEffects.createPieceModel(piece.Type, piece.Color, piece.UID)
-			local PiecePart = PieceModel:FindFirstChild("Display") :: BasePart
-			PieceModel.Parent = workspace
-			PieceModel:PivotTo(
-				boardOrigin
-					* CFrame.new(
-						squareSize * 4.5 - file * squareSize,
-						squareSize / 2 + PiecePart.Size.Y / 2,
-						rank * squareSize - squareSize * 4.5
-					)
-			)
-			PiecePart.CFrame = PieceModel.WorldPivot
-			PieceModels[piece.UID] = PieceModel
-		end
-	end
-end
-
 --[[
 	Mouse enter / leave player piece
 ]]
@@ -161,6 +133,7 @@ local function clearPieces()
 	for _, PieceModel in pairs(PieceModels) do
 		PieceModel:Destroy()
 	end
+	PieceModels = {}
 end
 
 local function hideMoveHighlights()
@@ -303,6 +276,23 @@ Mouse.Button1Down:Connect(function()
 end)
 
 Mouse.Button1Up:Connect(function()
+	-- Promotion selection
+	if isPromoting and SelectedPieceModel then
+		GameServiceRemote:FireServer("PromotePiece", SelectedPieceModel.Name)
+		isPromoting = false
+		task.defer(function()
+			for _, PieceModel in pairs(PromotionContainer:GetChildren()) do
+				local Display = PieceModel:FindFirstChild("Display") :: BasePart
+				TweenService
+					:Create(Display, TweenInfo.new(HOVER_FLOAT_TIME_S), { Size = Vector3.zero })
+					:Play()
+
+				task.wait(HOVER_FLOAT_TIME_S / 4)
+			end
+			task.delay(HOVER_FLOAT_TIME_S * 10, function() PromotionContainer:Destroy() end)
+		end)
+	end
+
 	if
 		not SelectedPieceModel
 		or not ChessUtils.isCoordValid(mouseBoardCoord, currentChessGame.state)
@@ -329,8 +319,18 @@ local params = RaycastParams.new()
 params.FilterType = Enum.RaycastFilterType.Include
 
 UserInputService.InputChanged:Connect(function(input: InputObject)
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+
 	-- Handle promotion selection
 	if isPromoting then
+		local function shrinkPieceModelDisplay(PieceModel: Model)
+			local Display = PieceModel:FindFirstChild("Display") :: BasePart
+			TweenService:Create(
+				Display,
+				TweenInfo.new(HOVER_FLOAT_TIME_S),
+				{ Size = Display:GetAttribute("OrigSize") :: Vector3 }
+			):Play()
+		end
 		if
 			Mouse.Target
 			and Mouse.Target.Parent
@@ -354,12 +354,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 
 			for _, Model in pairs(PromotionContainer:GetChildren()) do
 				if Model == PieceModel or not Model:IsA("Model") then continue end
-				local Display = Model:FindFirstChild("Display") :: BasePart
-				TweenService:Create(
-					Display,
-					TweenInfo.new(HOVER_FLOAT_TIME_S * 2),
-					{ Size = Display:GetAttribute("OrigSize") :: Vector3 }
-				):Play()
+				shrinkPieceModelDisplay(Model)
 			end
 
 			return
@@ -367,16 +362,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 
 		SelectedPieceModel = nil
 		PieceHighlight:Destroy()
-		if HoveredPieceModel then
-			local PiecePart = HoveredPieceModel:FindFirstChild("Display")
-			if PiecePart then
-				TweenService:Create(
-					PiecePart,
-					TweenInfo.new(HOVER_FLOAT_TIME_S * 2),
-					{ Size = PiecePart:GetAttribute("OrigSize") :: Vector3 }
-				):Play()
-			end
-		end
+		if HoveredPieceModel then shrinkPieceModelDisplay(HoveredPieceModel) end
 		HoveredPieceModel = nil
 		return
 	end
@@ -410,7 +396,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	end
 
 	-- Check mouse hit is valid
-	if input.UserInputType ~= Enum.UserInputType.MouseMovement or not Mouse.Target then
+	if not Mouse.Target then
 		unhoverPiece()
 		return
 	end
@@ -483,18 +469,16 @@ local function setupGame(chessGame: ChessTypes.ChessGame)
 	CameraController.camFocus = boardCF.Position
 
 	-- Populate initial board pieces from given state
-	populatePieces(Board, chessGame.state)
+	updateGame(chessGame)
 
 	-- Set player color
 	playerColor = (chessGame.WhitePlayer == Player and "White" or "Black") :: ChessTypes.PieceColor
-
-	currentChessGame = chessGame
 end
 
 function updateGame(updateChessGame: ChessTypes.ChessGame)
 	currentChessGame = updateChessGame
 	clearPieces()
-	populatePieces(BoardModel, currentChessGame.state)
+	PieceModels = ClientEffects.populatePieces(BoardModel, currentChessGame.state)
 end
 
 function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
