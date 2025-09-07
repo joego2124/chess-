@@ -25,6 +25,12 @@ export type ChessGame = {
 	promotingPiece: Piece?,
 }
 
+export type Selectable = {
+	Model: Model,
+	Display: BasePart,
+	Hitbox: BasePart,
+}
+
 ChessTypes.boardColors = {
 	Black = Color3.fromRGB(120, 82, 64),
 	White = Color3.fromRGB(234, 184, 146),

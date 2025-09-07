@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 
 local ChessUtils = require(ReplicatedStorage.Modules.Libraries.ChessUtils)
@@ -123,11 +124,11 @@ end
 function ClientEffects.populatePieces(
 	Board: Model,
 	boardState: ChessTypes.BoardState
-): { [string]: Model }
+): { [string]: ChessTypes.Selectable }
 	local BoardRoot = Board.PrimaryPart :: BasePart
 	local squareSize = (BoardRoot.Size / 8).X
 	local boardOrigin = BoardRoot.CFrame
-	local PieceModels = {}
+	local PieceSelectables = {}
 	for rank, rankTab in ipairs(boardState) do
 		for file, piece in ipairs(rankTab) do
 			if piece.Type == "NA" then continue end
@@ -135,7 +136,9 @@ function ClientEffects.populatePieces(
 				warn(`Piece type {piece.Type} from ({rank}, {file}) not found!`)
 				continue
 			end
-			local PieceModel = ClientEffects.createPieceModel(piece.Type, piece.Color, piece.UID)
+			local PieceSelectable =
+				ClientEffects.createPieceSelectable(piece.Type, piece.Color, piece.UID)
+			local PieceModel = PieceSelectable.Model
 			local PiecePart = PieceModel:FindFirstChild("Display") :: BasePart
 			PieceModel.Parent = workspace
 			PieceModel:PivotTo(
@@ -147,17 +150,17 @@ function ClientEffects.populatePieces(
 					)
 			)
 			PiecePart.CFrame = PieceModel.WorldPivot
-			PieceModels[piece.UID] = PieceModel
+			PieceSelectables[piece.UID] = PieceSelectable
 		end
 	end
-	return PieceModels
+	return PieceSelectables
 end
 
-function ClientEffects.createPieceModel(
+function ClientEffects.createPieceSelectable(
 	pieceType: ChessTypes.PieceType,
 	pieceColor: ChessTypes.PieceColor,
 	pieceUID: string
-): Model
+): ChessTypes.Selectable
 	local PieceModel = Instance.new("Model")
 
 	-- Clone and set up part
@@ -180,7 +183,11 @@ function ClientEffects.createPieceModel(
 	PieceModel:SetAttribute("UID", pieceUID)
 	PieceModel.Name = tostring(pieceType)
 
-	return PieceModel
+	return {
+		Model = PieceModel,
+		Display = PiecePart,
+		Hitbox = PieceHitbox,
+	}
 end
 
 local PIECE_START_ANG = math.rad(30)
@@ -200,11 +207,12 @@ function ClientEffects.promptPromotion(promotedPiece: ChessTypes.Piece, targetCo
 	local currentAng = PIECE_START_ANG
 
 	for i, pieceType in ipairs(ChessTypes.PROMOTION_OPTIONS) do
-		local Model = ClientEffects.createPieceModel(
+		local PieceSelectable = ClientEffects.createPieceSelectable(
 			pieceType :: ChessTypes.PieceType,
 			promotedPiece.Color,
 			"NA" -- Not sure what this should be for a UI only piece
 		)
+		local Model = PieceSelectable.Model
 		Model.Parent = PromotionContainer
 		Model.Name = pieceType
 		local spawnCF = centerCF
@@ -215,13 +223,7 @@ function ClientEffects.promptPromotion(promotedPiece: ChessTypes.Piece, targetCo
 		Display.Size = Vector3.zero
 		Display.Color = ChessTypes.pieceColors[promotedPiece.Color]
 		Display:SetAttribute("OrigSize", origSize)
-		ClientEffects.floatPiece(
-			Model,
-			-- CFrame.lookAt(spawnCF.Position, workspace.CurrentCamera.CFrame.Position),
-			spawnCF,
-			30,
-			i * math.pi / 6
-		)
+		ClientEffects.floatPiece(Model, spawnCF, 30, i * math.pi / 6)
 
 		task.delay((i - 1) * 0.1, function()
 			TweenService
@@ -234,6 +236,54 @@ function ClientEffects.promptPromotion(promotedPiece: ChessTypes.Piece, targetCo
 	end
 
 	return PromotionContainer
+end
+
+-- TODO: make this take from existing gui
+export type BillboardLabelType = "Persistent" | "Temporary"
+function ClientEffects.popupBillboardText(
+	text: string,
+	Adronee: BasePart,
+	offset: Vector3,
+	type: BillboardLabelType,
+	props: { [string]: any }?
+): (BillboardGui, { [string]: (...any) -> ...any })
+	local LabelGUI = ReplicatedStorage.Assets.UI.MenuPieceLabel:Clone()
+	LabelGUI.Size = UDim2.fromScale(Adronee.Size.Y * 4, Adronee.Size.Y * 2)
+	LabelGUI.StudsOffset = Vector3.new(0, Adronee.Size.Y / 2, 0) + offset
+	LabelGUI.Parent = Players.LocalPlayer.PlayerGui
+	LabelGUI.Adornee = Adronee
+
+	local Canvas = LabelGUI.CanvasGroup
+	local Frame = Canvas.Frame
+	local textObject
+	textObject = RichText:New(Frame, text, props or {
+		Looping = true,
+		AnimateStyle = "Float",
+		AnimateStyleTime = 4,
+		AnimateStyleAmplitude = 0.1,
+		Font = Enum.Font.DenkOne,
+		TextStrokeTransparency = 0,
+		BorderSizePixel = 2,
+		TextScale = 0.75,
+		ContainerHorizontalAlignment = "Center",
+	})
+	textObject:animateChars(true)
+	textObject:Animate(false)
+
+	if type == "Persistent" then return LabelGUI, textObject end
+
+	local FLOAT_AWAY_TIME_S = 2
+	delay(FLOAT_AWAY_TIME_S, function()
+		TweenService:Create(Canvas, TweenInfo.new(FLOAT_AWAY_TIME_S), {
+			GroupTransparency = 1,
+		}):Play()
+		TweenService:Create(LabelGUI, TweenInfo.new(FLOAT_AWAY_TIME_S), {
+			StudsOffset = LabelGUI.StudsOffset + Vector3.new(0, LabelGUI.Size.Y.Scale / 2, 0),
+		}):Play()
+		delay(FLOAT_AWAY_TIME_S * 1.1, function() LabelGUI:Destroy() end)
+	end)
+
+	return LabelGUI, textObject
 end
 
 return ClientEffects

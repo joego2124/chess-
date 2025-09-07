@@ -482,6 +482,10 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 				relativeHeight = layerCollector.AbsoluteSize.Y
 			elseif properties.TextScaleRelativeTo == "Frame" then
 				relativeHeight = frame.AbsoluteSize.Y
+				repeat -- TODO: still need to figure out a real solution for negative abs size
+					relativeHeight = frame.AbsoluteSize.Y
+					task.wait(0)
+				until relativeHeight > 0
 			end
 			return math.min(properties.TextScale * relativeHeight, 100)
 		else
@@ -815,7 +819,11 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 	local animateQueue = {}
 
 	local function updateAnimations()
-		if allTextReached and #animateQueue == 0 or animationDone then
+		if
+			allTextReached and #animateQueue == 0
+			or animationDone
+			or not (frame and frame.Parent)
+		then
 			animationDone = true
 			runService:UnbindFromRenderStep(animationRenderstepBinding)
 			animateQueue = {}
@@ -984,7 +992,7 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 	-- Paratext: Applies an animation to all characters in order
 	local BUBBLE_TIME = 0.3
 	local BUBBLE_SIZE = 0.5
-	function textObject:animateChars()
+	function textObject:animateChars(appear: boolean)
 		local function animateChar(labels)
 			for i, Label: TextLabel in pairs(labels) do
 				table.insert(animateQueue, {
@@ -1007,6 +1015,11 @@ function richText:New(frame, text, startingProperties, allowOverflow, prevTextOb
 		task.spawn(function()
 			for _, line in pairs(textFrames) do
 				for _, Word in pairs(line) do
+					if appear then
+						for i, Char: TextLabel in pairs(Word:GetChildren()) do
+							Char.Size = UDim2.fromScale(0, 0)
+						end
+					end
 					task.defer(function() animateChar(Word:GetChildren()) end)
 					task.wait(BUBBLE_TIME / 5)
 				end

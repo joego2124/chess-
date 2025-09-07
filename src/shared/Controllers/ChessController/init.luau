@@ -31,7 +31,7 @@ local DefaultSquare = ReplicatedStorage.Assets.Board.DefaultSquare
 -- Current client game vars
 local globalTargCamPos = Vector3.new()
 
-local PieceModels: { [string]: Model } = {}
+local PieceSelectables: { [string]: ChessTypes.Selectable } = {}
 local playerColor: ChessTypes.PieceColor = "White" -- Default, gets set when game starts
 local PieceHighlight: Highlight
 local ActiveMoveHighlights: { [string]: Highlight } = {}
@@ -48,24 +48,16 @@ local function initMenuScreen()
 	CameraController.camPos = MENU_CAM_POS
 
 	-- Set up menu pieces
-	local PawnModel = ClientEffects.createPieceModel("Pawn", "White", "NA")
-	local Pawn = PawnModel.PrimaryPart :: BasePart
+	local PawnSelectable = ClientEffects.createPieceSelectable("Pawn", "White", "NA")
+	local PawnModel = PawnSelectable.Model
+	local Pawn = PawnSelectable.Display
 	PawnModel.Parent = MenuObjects
 	PawnModel:ScaleTo(0.5 / ClientEffects.PIECE_SCALE_FACTOR)
 	ClientEffects.floatPiece(PawnModel, CFrame.new(CameraController.camFocus))
 
 	-- Create billboard label
-	local LabelGUI = ReplicatedStorage.Assets.UI.MenuPieceLabel:Clone()
-	LabelGUI.Size = UDim2.fromScale(Pawn.Size.Y * 4, Pawn.Size.Y * 2)
-	LabelGUI.StudsOffset = Vector3.new(0, Pawn.Size.Y / 2 * 1.25, 0)
-	LabelGUI.Parent = Player.PlayerGui
-	LabelGUI.Adornee = Pawn
-
-	local Frame = LabelGUI.CanvasGroup.Frame
-	local textObject
-	task.delay(0.15, function()
-		local text = "play!"
-		textObject = RichText:New(Frame, text, {
+	local LabelGUI, textObject =
+		ClientEffects.popupBillboardText("play!", Pawn, Vector3.zero, "Persistent", {
 			Looping = true,
 			AnimateStyle = "Float",
 			AnimateStyleTime = 4,
@@ -76,19 +68,18 @@ local function initMenuScreen()
 			TextScale = 1,
 			ContainerHorizontalAlignment = "Center",
 		})
-		textObject:Animate(false)
-	end)
+	local CanvasGroup = LabelGUI:FindFirstChildOfClass("CanvasGroup") :: CanvasGroup
 
 	-- Set up click detector
-	local origFrameSize = LabelGUI.CanvasGroup.Size
-	local Detector = Instance.new("ClickDetector", Pawn)
+	local origFrameSize = CanvasGroup.Size
+	local Detector = Instance.new("ClickDetector", PawnModel)
 	Detector.MaxActivationDistance = math.huge
 	Detector.MouseClick:Connect(function() GameServiceRemote:FireServer("RequestGame") end)
 	local incScale = 0.5
 	local TWEEN_TIME = 0.25
 	Detector.MouseHoverEnter:Connect(function()
 		TweenService:Create(
-			LabelGUI.CanvasGroup,
+			CanvasGroup,
 			TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 			{
 				Size = origFrameSize + UDim2.fromScale(incScale, incScale),
@@ -104,7 +95,7 @@ local function initMenuScreen()
 	end)
 	Detector.MouseHoverLeave:Connect(function()
 		TweenService:Create(
-			LabelGUI.CanvasGroup,
+			CanvasGroup,
 			TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 			{
 				Size = origFrameSize,
@@ -130,10 +121,10 @@ local mouseBoardCoord: Vector2
 local function clearPieces()
 	HoveredPieceModel = nil
 	SelectedPieceModel = nil
-	for _, PieceModel in pairs(PieceModels) do
-		PieceModel:Destroy()
+	for _, Selectable in pairs(PieceSelectables) do
+		Selectable.Model:Destroy()
 	end
-	PieceModels = {}
+	PieceSelectables = {}
 end
 
 local function hideMoveHighlights()
@@ -280,10 +271,11 @@ end)
 Mouse.Button1Up:Connect(function()
 	if not currentChessGame then return end
 
-	-- Promotion selection
+	-- Promotion selection cleanup
 	if isPromoting and SelectedPieceModel then
 		GameServiceRemote:FireServer("PromotePiece", SelectedPieceModel.Name)
 		isPromoting = false
+		ReplicatedStorage.Assets.Sounds.PitchUp:Play()
 		local offsetDelay = HOVER_FLOAT_TIME_S / 4
 		task.defer(function()
 			for _, PieceModel in pairs(PromotionContainer:GetChildren()) do
@@ -484,9 +476,24 @@ local function setupGame(chessGame: ChessTypes.ChessGame)
 end
 
 function updateGame(updateChessGame: ChessTypes.ChessGame)
+	if
+		currentChessGame
+		and currentChessGame.promotingPiece
+		and not updateChessGame.promotingPiece
+	then
+		local promotingPiece = currentChessGame.promotingPiece
+		local PromotingSquare = ChessUtils.getBoardSquareFromCoord(promotingPiece.Coord, BoardModel)
+		local PieceSelectable = PieceSelectables[promotingPiece.UID]
+		ClientEffects.popupBillboardText(
+			"promoted!",
+			PromotingSquare,
+			Vector3.new(0, PieceSelectable.Display.Size.Y, 0),
+			"Temporary"
+		)
+	end
 	currentChessGame = updateChessGame
 	clearPieces()
-	PieceModels = ClientEffects.populatePieces(BoardModel, currentChessGame.state)
+	PieceSelectables = ClientEffects.populatePieces(BoardModel, currentChessGame.state)
 end
 
 function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
