@@ -11,9 +11,10 @@ local ChessUtils = require(ReplicatedStorage.Modules.Libraries.ChessUtils)
 local ChessTypes = require(ReplicatedStorage.Modules.Types.ChessTypes)
 
 local GameService = {
-	games = {} :: { ChessTypes.ChessGame },
 	RemoteEvent = Instance.new("RemoteEvent"),
 }
+
+local activeGames: { ChessTypes.ChessGame } = {}
 
 local function fenToBoardState(fen: string): ChessTypes.BoardState
 	local state: ChessTypes.BoardState = {}
@@ -48,9 +49,8 @@ local function fenToBoardState(fen: string): ChessTypes.BoardState
 		local piece: ChessTypes.Piece = {
 			Type = ChessTypes.fenLookUp[string.lower(c)],
 			Color = (
-					string.match(c, "%u") and "White" or (
-						string.match(c, "%l") and "Black" or "Env"
-					)
+					string.match(c, "%u") and "White"
+					or (string.match(c, "%l") and "Black" or "Env")
 				) :: ChessTypes.PieceColor,
 			UID = HttpService:GenerateGUID(),
 			Coord = Vector2.new(rank, file),
@@ -83,17 +83,9 @@ end
 
 local function getGameFromPlayer(Player: Player): ChessTypes.ChessGame
 	local chessGame: ChessTypes.ChessGame
-	local PlayerColor: ChessTypes.PieceColor
-	for _, game in pairs(GameService.games) do
-		if game.WhitePlayer == Player or game.BlackPlayer == Player then
-			PlayerColor = (
-				game.WhitePlayer == Player and "White" or "Black"
-			) :: ChessTypes.PieceColor
-			if game.turn ~= PlayerColor then -- Out of turn request, cancel
-				warn(`{Player} attempted to request move when out of turn!`)
-				-- return
-			end
-			chessGame = game
+	for _, activeGame in pairs(activeGames) do
+		if activeGame.WhitePlayer == Player or activeGame.BlackPlayer == Player then
+			chessGame = activeGame
 			break
 		end
 	end
@@ -114,6 +106,14 @@ local function playerPlacePiece(Player: Player, targetCoord: Vector2, pieceUID: 
 	local activeGame = getGameFromPlayer(Player)
 	if not activeGame then return end
 	local boardState = activeGame.state
+
+	-- Check it's actually the player's turn
+	local PlayerColor: ChessTypes.PieceColor
+	PlayerColor = (activeGame.WhitePlayer == Player and "White" or "Black") :: ChessTypes.PieceColor
+	if activeGame.turn ~= PlayerColor then -- Out of turn request, cancel
+		warn(`{Player} attempted to request move when out of turn!`)
+		return
+	end
 
 	-- Get the piece from provided UID
 	local piece = ChessUtils.getPieceFromUID(pieceUID, boardState)
@@ -155,6 +155,7 @@ local function promotePiece(Player: Player, pieceType: ChessTypes.PieceType)
 		HasMoved = false,
 	})
 	activeGame.promotingPiece = nil
+	switchTurns(activeGame)
 	updateGameForPlayers(activeGame)
 end
 
@@ -164,9 +165,15 @@ function GameService.init(RuntimeFolder: Folder, RemotesFolder: Folder)
 	GameService.RemoteEvent.Parent = RemotesFolder
 	GameService.RemoteEvent.OnServerEvent:Connect(function(Player: Player, eventName: string, ...)
 		if eventName == "RequestGame" then
-			local newGame = GameService.createGame(Player)
-			table.insert(GameService.games, newGame)
-			GameService.RemoteEvent:FireClient(Player, "StartGame", newGame)
+			local activeGame: ChessTypes.ChessGame
+			if #activeGames == 0 then
+				activeGame = GameService.createGame(Player)
+				table.insert(activeGames, activeGame)
+			else
+				activeGame = activeGames[1]
+				activeGame.BlackPlayer = Player
+			end
+			GameService.RemoteEvent:FireClient(Player, "StartGame", activeGame)
 		elseif eventName == "PlacePiece" then
 			playerPlacePiece(Player, ...)
 		elseif eventName == "PromotePiece" then
@@ -182,8 +189,7 @@ function GameService.createGame(Player: Player): ChessTypes.ChessGame
 		state = fenToBoardState(STARTING_FEN),
 		turn = "White",
 		WhitePlayer = Player,
-		-- BlackPlayer = "AI",
-		BlackPlayer = Player,
+		BlackPlayer = "AI",
 	}
 	return newChessGame
 end

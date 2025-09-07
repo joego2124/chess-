@@ -267,7 +267,9 @@ local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): bool
 end
 
 Mouse.Button1Down:Connect(function()
-	if not HoveredPieceModel then return end
+	if currentChessGame and playerColor ~= currentChessGame.turn or not HoveredPieceModel then
+		return
+	end
 	SelectedPieceModel = HoveredPieceModel
 	selectedPieceTargetCF = getSelectedPieceMouseCF(HoveredPieceModel)
 	prevSelectedPiecePos = selectedPieceTargetCF.Position
@@ -276,20 +278,26 @@ Mouse.Button1Down:Connect(function()
 end)
 
 Mouse.Button1Up:Connect(function()
+	if not currentChessGame then return end
+
 	-- Promotion selection
 	if isPromoting and SelectedPieceModel then
 		GameServiceRemote:FireServer("PromotePiece", SelectedPieceModel.Name)
 		isPromoting = false
+		local offsetDelay = HOVER_FLOAT_TIME_S / 4
 		task.defer(function()
 			for _, PieceModel in pairs(PromotionContainer:GetChildren()) do
 				local Display = PieceModel:FindFirstChild("Display") :: BasePart
 				TweenService
 					:Create(Display, TweenInfo.new(HOVER_FLOAT_TIME_S), { Size = Vector3.zero })
 					:Play()
-
-				task.wait(HOVER_FLOAT_TIME_S / 4)
+				task.wait(offsetDelay)
 			end
-			task.delay(HOVER_FLOAT_TIME_S * 10, function() PromotionContainer:Destroy() end)
+			local numPieces = #PromotionContainer:GetChildren()
+			task.delay(
+				(HOVER_FLOAT_TIME_S + offsetDelay) * numPieces,
+				function() PromotionContainer:Destroy() end
+			)
 		end)
 	end
 
@@ -413,7 +421,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 
 	-- Check mouse is hovering over player's piece
 	local hoveringPiece = ChessUtils.getPieceFromModel(PieceModel, currentChessGame.state)
-	if not hoveringPiece or ((hoveringPiece.Color ~= playerColor) and false) then -- TODO: temp test
+	if not hoveringPiece or ((hoveringPiece.Color ~= playerColor) and true) then -- TODO: temp test
 		unhoverPiece()
 		return
 	end
