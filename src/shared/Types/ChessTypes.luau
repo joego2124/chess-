@@ -25,12 +25,6 @@ export type ChessGame = {
 	promotingPiece: Piece?,
 }
 
-export type Selectable = {
-	Model: Model,
-	Display: BasePart,
-	Hitbox: BasePart,
-}
-
 ChessTypes.boardColors = {
 	Black = Color3.fromRGB(120, 82, 64),
 	White = Color3.fromRGB(234, 184, 146),
@@ -59,6 +53,7 @@ ChessTypes.PROMOTION_OPTIONS = {
 
 ChessTypes.hoverHighlightColors = {
 	selectColor = Color3.fromRGB(0, 170, 255),
+	inactiveSelectColor = Color3.fromHSV(0, 0, 0.25),
 	pieceMoveSquareColor = Color3.fromRGB(255, 200, 0),
 }
 

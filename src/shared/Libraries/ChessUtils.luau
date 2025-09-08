@@ -386,10 +386,6 @@ function ChessUtils.getPieceFromUID(
 	return
 end
 
--- function ChessUtils.getModelFromPiece()
-
--- end
-
 function ChessUtils.getBoardSquareFromCoord(coord: Vector2, Board: Model): BasePart
 	return (Board:FindFirstChild(tostring(coord.X)) :: BasePart):FindFirstChild(
 			tostring(coord.Y)
