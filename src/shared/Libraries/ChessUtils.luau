@@ -392,4 +392,12 @@ function ChessUtils.getBoardSquareFromCoord(coord: Vector2, Board: Model): BaseP
 		) :: BasePart
 end
 
+function ChessUtils.iterateBoard(boardState: ChessTypes.BoardState, f: (ChessTypes.Piece) -> ())
+	for _, rank in ipairs(boardState) do
+		for _, piece in pairs(rank) do
+			f(piece)
+		end
+	end
+end
+
 return ChessUtils

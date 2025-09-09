@@ -275,7 +275,7 @@ end
 function ClientEffects.createPieceSelectable(
 	pieceType: ChessTypes.PieceType,
 	pieceColor: ChessTypes.PieceColor,
-	pieceUID: string
+	pieceUID: string?
 ): Selectable
 	-- Clone and set up display part
 	local PiecePart = ReplicatedStorage.Assets.Pieces:FindFirstChild(pieceType) :: BasePart
@@ -285,7 +285,7 @@ function ClientEffects.createPieceSelectable(
 
 	-- Create selectable from piece display part
 	local Selectable = ClientEffects.createSelectable(PiecePart)
-	Selectable.Model:SetAttribute("UID", pieceUID)
+	Selectable.Model:SetAttribute("UID", pieceUID or HttpService:GenerateGUID())
 	Selectable.Model.Name = tostring(pieceType)
 	Selectable.sizeSpring.Damper = 0.35
 
@@ -320,6 +320,7 @@ function ClientEffects.promptPromotion(
 			newUID -- Not sure what this should be for a UI only piece
 		)
 		UISelectables[newUID] = PieceSelectable
+		print(UISelectables)
 
 		local Model = PieceSelectable.Model
 		Model.Parent = PromotionContainer
