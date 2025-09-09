@@ -263,10 +263,7 @@ function ClientEffects.createSelectable(DisplayPart: BasePart): Selectable
 	}
 end
 
-function ClientEffects.createUISelectable(
-	DisplayPart: BasePart,
-	UISelectables: { [string]: Selectable }
-): Selectable
+function ClientEffects.createUISelectable(DisplayPart: BasePart): Selectable
 	local Selectable = ClientEffects.createSelectable(DisplayPart)
 	Selectable.Model:SetAttribute("UID", HttpService:GenerateGUID())
 	return Selectable
@@ -320,7 +317,6 @@ function ClientEffects.promptPromotion(
 			newUID -- Not sure what this should be for a UI only piece
 		)
 		UISelectables[newUID] = PieceSelectable
-		print(UISelectables)
 
 		local Model = PieceSelectable.Model
 		Model.Parent = PromotionContainer

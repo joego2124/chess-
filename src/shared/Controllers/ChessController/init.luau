@@ -130,9 +130,10 @@ local function clearPieces()
 			warn(`Piece {Selectable} has no Selectable cached!`)
 			return
 		end
+		print(Selectable)
 		Selectable.Model:Destroy()
+		Selectables[piece.UID] = nil
 	end)
-	Selectables = {}
 end
 
 -- Helper function to place piece at mouse cf relative to board
@@ -440,7 +441,10 @@ function updateGame(updateChessGame: ChessTypes.ChessGame)
 	end
 	currentChessGame = updateChessGame
 	clearPieces()
-	Selectables = ClientEffects.populatePieces(BoardModel, currentChessGame.state)
+	local newSelectables = ClientEffects.populatePieces(BoardModel, currentChessGame.state)
+	for UID, Selectable in pairs(newSelectables) do --TODO: temp hacky way of updating
+		Selectables[UID] = Selectable
+	end
 end
 
 function ChessController.init(RuntimeFolder: Folder, RemotesFolder: Folder)
