@@ -12,11 +12,14 @@ local RichText = require(ReplicatedStorage.Modules.Libraries.RichText)
 local Spring = require(ReplicatedStorage.Modules.Libraries.Spring)
 local ChessTypes = require(ReplicatedStorage.Modules.Types.ChessTypes)
 
+export type SelectableType = "GamePiece" | "Interactable" | "Item"
 export type Selectable = {
 	Model: Model,
 	Display: BasePart,
 	Hitbox: BasePart,
 	sizeSpring: Spring.Spring<Vector3>,
+	Type: SelectableType,
+	UID: string,
 }
 
 -- TODO: redundant reference
@@ -114,11 +117,7 @@ function ClientEffects.floatPiece(
 end
 
 local HOVER_FLOAT_TIME_S = 0.1
-function ClientEffects.selectSelectable(
-	Selectable: Selectable,
-	isPlayerTurn: boolean,
-	isPiece: boolean
-)
+function ClientEffects.selectSelectable(Selectable: Selectable, isPlayerTurn: boolean)
 	local DisplayPart = Selectable.Display
 	local Highlight = Instance.new("Highlight")
 
@@ -137,7 +136,7 @@ function ClientEffects.selectSelectable(
 		{ FillTransparency = 0.75 }
 	):Play()
 
-	if isPiece then
+	if Selectable.Type == "GamePiece" then
 		TweenService:Create(Selectable.Display, TweenInfo.new(HOVER_FLOAT_TIME_S), {
 			CFrame = Selectable.Model.WorldPivot * CFrame.new(0, DefaultSquare.Size.X / 2, 0),
 		}):Play()
@@ -148,11 +147,11 @@ function ClientEffects.selectSelectable(
 	Selectable.sizeSpring:SetTarget((Display:GetAttribute("OrigSize") :: Vector3) * 1.5)
 end
 
-function ClientEffects.unselectSelectable(Selectable: Selectable, isPiece)
+function ClientEffects.unselectSelectable(Selectable: Selectable)
 	local Display = Selectable.Display
 	local Highlight = Display:FindFirstChildOfClass("Highlight")
 	if Highlight then Highlight:Destroy() end
-	if isPiece then
+	if Selectable.Type == "GamePiece" then
 		TweenService:Create(
 			Display,
 			TweenInfo.new(HOVER_FLOAT_TIME_S),
@@ -235,10 +234,17 @@ function ClientEffects.populatePieces(
 	return PieceSelectables
 end
 
-function ClientEffects.createSelectable(DisplayPart: BasePart): Selectable
+function ClientEffects.createSelectable(
+	DisplayPart: BasePart,
+	selectableType: SelectableType,
+	UID: string?
+): Selectable
 	local Model = Instance.new("Model")
+	DisplayPart.Anchored = true
+	DisplayPart.CanCollide = false
 	DisplayPart.Name = "Display"
 	DisplayPart:SetAttribute("OrigSize", DisplayPart.Size)
+	UID = UID or HttpService:GenerateGUID()
 
 	-- Create model and mouse hitbox
 	local PieceHitbox = Instance.new("Part", Model)
@@ -250,6 +256,7 @@ function ClientEffects.createSelectable(DisplayPart: BasePart): Selectable
 	PieceHitbox.CFrame = DisplayPart.CFrame
 	DisplayPart.Parent = Model
 	Model.PrimaryPart = PieceHitbox
+	Model:SetAttribute("UID", UID)
 
 	local sizeSpring = Spring.new(DisplayPart.Size)
 	sizeSpring.Damper = 0.25
@@ -260,12 +267,20 @@ function ClientEffects.createSelectable(DisplayPart: BasePart): Selectable
 		Display = DisplayPart,
 		Hitbox = PieceHitbox,
 		sizeSpring = sizeSpring,
+		Type = selectableType,
+		UID = UID :: string,
 	}
 end
 
 function ClientEffects.createUISelectable(DisplayPart: BasePart): Selectable
-	local Selectable = ClientEffects.createSelectable(DisplayPart)
-	Selectable.Model:SetAttribute("UID", HttpService:GenerateGUID())
+	local UID = HttpService:GenerateGUID()
+	local Selectable = ClientEffects.createSelectable(DisplayPart, "Interactable", UID)
+	return Selectable
+end
+
+function ClientEffects.createItemSelectable(DisplayPart: BasePart): Selectable
+	local UID = HttpService:GenerateGUID()
+	local Selectable = ClientEffects.createSelectable(DisplayPart, "Item", UID)
 	return Selectable
 end
 
@@ -281,7 +296,7 @@ function ClientEffects.createPieceSelectable(
 	PiecePart.Size *= ClientEffects.PIECE_SCALE_FACTOR
 
 	-- Create selectable from piece display part
-	local Selectable = ClientEffects.createSelectable(PiecePart)
+	local Selectable = ClientEffects.createSelectable(PiecePart, "GamePiece")
 	Selectable.Model:SetAttribute("UID", pieceUID or HttpService:GenerateGUID())
 	Selectable.Model.Name = tostring(pieceType)
 	Selectable.sizeSpring.Damper = 0.35

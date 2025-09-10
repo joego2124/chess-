@@ -42,11 +42,12 @@ local function initMenuScreen()
 	CameraController.camPos = MENU_CAM_POS
 
 	-- Set up menu pieces
-	local PawnSelectable = ClientEffects.createPieceSelectable("Pawn", "White", "Start")
+	local PawnSelectable =
+		ClientEffects.createUISelectable(ReplicatedStorage.Assets.Pieces.Pawn:Clone())
 	local PawnModel = PawnSelectable.Model
 	local PawnDisplay = PawnSelectable.Display
 	PawnModel.Parent = MenuObjects
-	PawnModel:ScaleTo(0.5 / ClientEffects.PIECE_SCALE_FACTOR)
+	PawnModel:ScaleTo(0.5)
 	PawnDisplay:SetAttribute("OrigSize", PawnDisplay.Size)
 	ClientEffects.floatPiece(PawnModel, CFrame.new(CameraController.camFocus))
 	Selectables[PawnSelectable.Model:GetAttribute("UID") :: string] = PawnSelectable
@@ -116,21 +117,20 @@ end
 --[[
 	Mouse enter / leave player piece
 ]]
-local SelectedPieceModel: Model?
-local selectedPieceTargetCF: CFrame = CFrame.new()
-local HoveredPieceModel: Model?
+local DraggedSelectable: ClientEffects.Selectable?
+local draggedTargetCF: CFrame = CFrame.new()
+local HoveredSelectable: ClientEffects.Selectable?
 local mouseBoardCoord: Vector2
 
 local function clearPieces()
-	HoveredPieceModel = nil
-	SelectedPieceModel = nil
+	HoveredSelectable = nil
+	DraggedSelectable = nil
 	ChessUtils.iterateBoard(currentChessGame.state, function(piece)
 		local Selectable = Selectables[piece.UID]
 		if not Selectable then
 			warn(`Piece {Selectable} has no Selectable cached!`)
 			return
 		end
-		print(Selectable)
 		Selectable.Model:Destroy()
 		Selectables[piece.UID] = nil
 	end)
@@ -151,13 +151,13 @@ local function getSelectedPieceMouseCF(PieceModel: Model)
 end
 
 local HOVER_FLOAT_TIME_S = 0.1
-local function unhoverPiece()
-	if not HoveredPieceModel or not HoveredPieceModel:FindFirstChild("Display") then return end
-	local uid = HoveredPieceModel:GetAttribute("UID") :: string
+local function unhoverSelectable()
+	if not HoveredSelectable then return end
+	local uid = HoveredSelectable.Model:GetAttribute("UID") :: string
 	local Selectable = Selectables[uid]
-	ClientEffects.unselectSelectable(Selectable, true)
+	ClientEffects.unselectSelectable(Selectable)
 	ClientEffects.hideMoveHighlights()
-	HoveredPieceModel = nil
+	HoveredSelectable = nil
 end
 
 -- Piece dragging
@@ -165,13 +165,10 @@ local PIECE_ROT_LIMIT_RAD = math.pi / 3
 local prevSelectedPiecePos = Vector3.zero
 local rotSpring = Spring.new(Vector2.zero)
 local posSpring = Spring.new(Vector3.zero)
-local sizeSpring = Spring.new(Vector3.zero)
 rotSpring.Damper = 0.4
 rotSpring.Speed = 20
 posSpring.Damper = 1
 posSpring.Speed = 30
-sizeSpring.Damper = 0.25
-sizeSpring.Speed = 25
 local tweenedVel = Vector3.zero -- intermediary value required for lerp
 
 RunService.Heartbeat:Connect(function(dt: number)
@@ -183,25 +180,21 @@ RunService.Heartbeat:Connect(function(dt: number)
 		Selectable.Display.Size = Selectable.sizeSpring.Position
 	end
 
-	if not SelectedPieceModel then return end
-	local DisplayPart = SelectedPieceModel:FindFirstChild("Display") :: BasePart
+	if not DraggedSelectable then return end
 
-	-- Handle promotion UI piece selection
-	if isPromoting then
-		-- 	DisplayPart.Size = sizeSpring.Position
-		return
-	end
+	-- Promotion UI pieces gets set as DraggedSelectable, skip drag stuff
+	if isPromoting then return end
 
 	-- Update vel from mouse movement
-	local offsetCF = CFrame.new(0, DisplayPart.Size.Y / 2, 0)
-	local vel = (selectedPieceTargetCF.Position - prevSelectedPiecePos) / dt * 0.05
+	local offsetCF = CFrame.new(0, DraggedSelectable.Display.Size.Y / 2, 0)
+	local vel = (draggedTargetCF.Position - prevSelectedPiecePos) / dt * 0.05
 	tweenedVel = tweenedVel + (vel - tweenedVel) * (1 - math.exp(-rotSpring.Speed * 20 * dt))
 
 	-- Update springs and apply CF
 	rotSpring:SetTarget(Vector2.new(tweenedVel.X, tweenedVel.Z))
-	posSpring:SetTarget(selectedPieceTargetCF.Position)
+	posSpring:SetTarget(draggedTargetCF.Position)
 
-	DisplayPart.CFrame = CFrame.new(posSpring.Position)
+	DraggedSelectable.Display.CFrame = CFrame.new(posSpring.Position)
 		* offsetCF
 		* CFrame.Angles(
 			math.clamp(rotSpring.Position.Y, -PIECE_ROT_LIMIT_RAD, PIECE_ROT_LIMIT_RAD),
@@ -211,11 +204,10 @@ RunService.Heartbeat:Connect(function(dt: number)
 		* offsetCF:Inverse()
 
 	-- Update prev pos
-	prevSelectedPiecePos = selectedPieceTargetCF.Position
+	prevSelectedPiecePos = draggedTargetCF.Position
 end)
 
-local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): boolean
-	local pieceUID = SelectedPieceModel:GetAttribute("UID") :: string
+local function placePiece(targetCoord: Vector2, pieceUID: string): boolean
 	local selectedPiece = ChessUtils.getPieceFromUID(pieceUID, currentChessGame.state)
 	if
 		not selectedPiece
@@ -223,18 +215,21 @@ local function placePiece(targetCoord: Vector2, SelectedPieceModel: Model): bool
 	then
 		return false
 	end
-	GameServiceRemote:FireServer("PlacePiece", targetCoord, SelectedPieceModel:GetAttribute("UID"))
+	GameServiceRemote:FireServer("PlacePiece", targetCoord, pieceUID)
 	return true
 end
 
 Mouse.Button1Down:Connect(function()
 	if not currentChessGame then return end -- TODO: temp hack for menu
-	if currentChessGame and playerColor ~= currentChessGame.turn or not HoveredPieceModel then
+
+	-- TODO: temp hack for clicking promotion ui pieces
+	if currentChessGame and playerColor ~= currentChessGame.turn or not HoveredSelectable then
 		return
 	end
-	SelectedPieceModel = HoveredPieceModel
-	selectedPieceTargetCF = getSelectedPieceMouseCF(HoveredPieceModel)
-	prevSelectedPiecePos = selectedPieceTargetCF.Position
+
+	DraggedSelectable = HoveredSelectable
+	draggedTargetCF = getSelectedPieceMouseCF(HoveredSelectable.Model)
+	prevSelectedPiecePos = draggedTargetCF.Position
 	posSpring.Position = prevSelectedPiecePos
 	rotSpring.Position = Vector2.zero
 end)
@@ -243,8 +238,8 @@ Mouse.Button1Up:Connect(function()
 	if not currentChessGame then return end
 
 	-- Promotion selection cleanup
-	if isPromoting and SelectedPieceModel then
-		GameServiceRemote:FireServer("PromotePiece", SelectedPieceModel.Name)
+	if isPromoting and DraggedSelectable then
+		GameServiceRemote:FireServer("PromotePiece", DraggedSelectable.Model.Name)
 		isPromoting = false
 		ReplicatedStorage.Assets.Sounds.PitchUp:Play()
 		local offsetDelay = HOVER_FLOAT_TIME_S / 4
@@ -264,13 +259,21 @@ Mouse.Button1Up:Connect(function()
 		end)
 	end
 
-	if not SelectedPieceModel then return end
-	local DisplayPart = SelectedPieceModel:FindFirstChild("Display") :: BasePart
+	if not DraggedSelectable then return end
+
+	-- TODO: temp hack for placing items, need to add hover debounce
+	if DraggedSelectable.Type == "Item" then
+		unhoverSelectable()
+		DraggedSelectable.Hitbox.CFrame = draggedTargetCF
+		DraggedSelectable.Display.CFrame = draggedTargetCF
+		DraggedSelectable = nil
+		return
+	end
 
 	-- Try to place piece
 	if ChessUtils.isCoordValid(mouseBoardCoord, currentChessGame.state) then
 		local isCapture = not ChessUtils.isCoordEmpty(mouseBoardCoord, currentChessGame.state)
-		if placePiece(mouseBoardCoord, SelectedPieceModel) then
+		if placePiece(mouseBoardCoord, DraggedSelectable.Model:GetAttribute("UID") :: string) then
 			ClientEffects.hideMoveHighlights()
 			ReplicatedStorage.Assets.Sounds[isCapture and "Take" or "Move"]:Play()
 			return
@@ -278,8 +281,10 @@ Mouse.Button1Up:Connect(function()
 	end
 
 	-- Invalid placement, replace part to start
-	DisplayPart.CFrame = SelectedPieceModel.WorldPivot
-	SelectedPieceModel = nil
+	DraggedSelectable.Display.CFrame = DraggedSelectable.Model.WorldPivot
+	unhoverSelectable()
+	DraggedSelectable = nil
+	HoveredSelectable = nil
 	ReplicatedStorage.Assets.Sounds.Hover:Play()
 end)
 
@@ -297,19 +302,21 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 			and Mouse.Target:IsDescendantOf(PromotionContainer)
 		then
 			local PieceModel = Mouse.Target.Parent
-			if HoveredPieceModel == PieceModel then return end
-			unhoverPiece()
-			HoveredPieceModel = PieceModel
-			SelectedPieceModel = PieceModel -- TODO: still temp fix for being able to click
-			print(Selectables)
-			ClientEffects.selectSelectable(Selectables[PieceModel:GetAttribute("UID")], true, false)
+			local pieceUID: string? = PieceModel:GetAttribute("UID")
+			if not pieceUID then return end
+			local PieceSelectable = Selectables[pieceUID]
+			if HoveredSelectable == PieceSelectable then return end
+			unhoverSelectable()
+			HoveredSelectable = PieceSelectable
+			DraggedSelectable = PieceSelectable -- TODO: still temp fix for being able to click
+			ClientEffects.selectSelectable(Selectables[pieceUID], true)
 			ReplicatedStorage.Assets.Sounds.Bubble:Play()
 			return
 		end
 
 		-- Unselect prev selected promotion piece
-		unhoverPiece()
-		SelectedPieceModel = nil
+		unhoverSelectable()
+		DraggedSelectable = nil
 		return
 	end
 
@@ -326,15 +333,15 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	end
 
 	-- State for when piece is already being dragged, skip piece hover checks
-	if SelectedPieceModel and Mouse.Hit then
-		selectedPieceTargetCF = getSelectedPieceMouseCF(SelectedPieceModel)
+	if DraggedSelectable and Mouse.Hit then
+		draggedTargetCF = getSelectedPieceMouseCF(DraggedSelectable.Model)
 		ClientEffects.updateMoveHighlights(mouseBoardCoord)
 		return
 	end
 
 	-- Check mouse hit is valid
 	if not Mouse.Target then
-		unhoverPiece()
+		unhoverSelectable()
 		return
 	end
 
@@ -342,33 +349,33 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	local PieceModel = Mouse.Target.Parent
 	local pieceUID = PieceModel:GetAttribute("UID") :: string?
 	if not PieceModel or not pieceUID then
-		unhoverPiece()
+		unhoverSelectable()
 		return
 	end
+	local PieceSelectable = Selectables[pieceUID]
 
 	-- Do nothing if hovering over same piece
-	if HoveredPieceModel == PieceModel then return end
+	if not PieceSelectable or HoveredSelectable == PieceSelectable then return end
 
 	-- Ignore if hovering over enemy's piece
 	local hoveringPiece: ChessTypes.Piece?
-	if currentChessGame and Selectables[pieceUID] then -- if this is a game piece
+	if currentChessGame then -- if this is a game piece
 		hoveringPiece = ChessUtils.getPieceFromUID(pieceUID, currentChessGame.state)
 		if hoveringPiece and ((hoveringPiece.Color ~= playerColor) and true) then
-			unhoverPiece()
+			unhoverSelectable()
 			return
 		end
 	end
 
 	-- Unhover currently hovered piece if applicable
-	unhoverPiece()
+	unhoverSelectable()
 
 	-- Apply hover effect to newly hovered piece
-	local PiecePart = PieceModel:FindFirstChild("Display")
-	local isPlayerTurn = hoveringPiece and (currentChessGame.turn == playerColor) or true
-	if not PiecePart then return end
-	local uid = PieceModel:GetAttribute("UID") :: string
-	ClientEffects.selectSelectable(Selectables[uid], isPlayerTurn, true)
-	HoveredPieceModel = PieceModel
+	local isPlayerTurn = (hoveringPiece and currentChessGame) -- TODO: fix logic
+			and (currentChessGame.turn == playerColor)
+		or true
+	ClientEffects.selectSelectable(PieceSelectable, isPlayerTurn)
+	HoveredSelectable = PieceSelectable
 
 	-- Highlight moves
 	if hoveringPiece then
@@ -419,6 +426,19 @@ local function setupGame(chessGame: ChessTypes.ChessGame)
 
 	-- Set player color
 	playerColor = (chessGame.WhitePlayer == Player and "White" or "Black") :: ChessTypes.PieceColor
+
+	-- TODO: temp setup for item testing
+	local IceSelectable =
+		ClientEffects.createItemSelectable(ReplicatedStorage.Assets.Items.Ice:Clone())
+	Selectables[IceSelectable.UID] = IceSelectable
+	IceSelectable.Model.Parent = workspace
+	IceSelectable.Model:PivotTo(BoardModel.WorldPivot * CFrame.new(0, 1, 0))
+
+	local AirStrikeSelectable =
+		ClientEffects.createItemSelectable(ReplicatedStorage.Assets.Items.AirStrike:Clone())
+	Selectables[AirStrikeSelectable.UID] = AirStrikeSelectable
+	AirStrikeSelectable.Model.Parent = workspace
+	AirStrikeSelectable.Model:PivotTo(BoardModel.WorldPivot * CFrame.new(3, 5, 0))
 end
 
 function updateGame(updateChessGame: ChessTypes.ChessGame)
